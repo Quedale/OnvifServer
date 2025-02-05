@@ -31,7 +31,8 @@ find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 include_directories(src
-                    src/generated${GSOAP_SRC_DIR}/gsoap/ 
+                    src/generated
+                    ${GSOAP_SRC_DIR}/gsoap/ 
                     ${GSOAP_SRC_DIR}/gsoap/import 
                     ${GSOAP_SRC_DIR}/gsoap/custom 
                     ${GSOAP_SRC_DIR}/gsoap/plugin
