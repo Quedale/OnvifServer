@@ -21,7 +21,7 @@
 
 #define ONVIF_DEFINE_SECURE_METHOD(onvif_method) \
     ONVIF_DEFINE_METHOD(onvif_method) { \
-    C_WARN(#onvif_method); \
+    C_DEBUG(#onvif_method); \
     const char *username = soap_wsse_get_Username(soap); \
     const char *password; \
     if (!username || !strlen(username)){ \

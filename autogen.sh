@@ -948,7 +948,7 @@ if [ ! -z "$(pkgCheck project="gsoap" name=gsoap minver=$gsoap_version)" ]; then
     LIBS='-ldl -lpthread' \
     buildMakeProject project="gsoap" srcdir="gsoap-2.8" prefix="$SUBPROJECT_DIR/gsoap-2.8/build/dist" autogen="skip" configure="--with-openssl=/usr/lib/ssl"
 fi
-exit 1
+
 # This option still required internet to reach oasis schemes.
 # no internet requirement to support flatpak builder
 # downloadAndExtract file="24.06.tar.gz" path="https://github.com/onvif/specs/archive/refs/tags/24.06.tar.gz"
