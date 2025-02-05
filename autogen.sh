@@ -894,9 +894,6 @@ export PKG_CONFIG_PATH="$SUBPROJECT_DIR/zlib-1.2.13/build/dist/lib/pkgconfig":$P
 export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libntlm-1.8/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
 gsoap_version=2.8.134
 if [ ! -z "$(pkgCheck project="gsoap" name=gsoap minver=$gsoap_version)" ]; then
-    echo " failed"
-    pkgCheck project="gsoap" name=gsoap minver=$gsoap_version
-    exit 1
     if [ ! -z "$(pkgCheck project="zlib" name=zlib minver=1.2.11)" ]; then
         downloadAndExtract project="zlib" file="zlib-1.2.13.tar.gz" path="https://www.zlib.net/zlib-1.2.13.tar.gz"
         buildMakeProject project="zlib" srcdir="zlib-1.2.13" prefix="$SUBPROJECT_DIR/zlib-1.2.13/build/dist"
@@ -951,7 +948,7 @@ if [ ! -z "$(pkgCheck project="gsoap" name=gsoap minver=$gsoap_version)" ]; then
     LIBS='-ldl -lpthread' \
     buildMakeProject project="gsoap" srcdir="gsoap-2.8" prefix="$SUBPROJECT_DIR/gsoap-2.8/build/dist" autogen="skip" configure="--with-openssl=/usr/lib/ssl"
 fi
-
+exit 1
 # This option still required internet to reach oasis schemes.
 # no internet requirement to support flatpak builder
 # downloadAndExtract file="24.06.tar.gz" path="https://github.com/onvif/specs/archive/refs/tags/24.06.tar.gz"
