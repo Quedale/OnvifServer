@@ -14,10 +14,10 @@ I may consider adding additional ONVIF device types like NetworkVideoDisplay, Ne
 # Working
 - WS-Security and WS-Discovery (gsoap)
 - Barebone device and media service
+- Barebone RTSP Server (gstreamer)
 - Stand-alone (No external webserver required)
 
 # TODO
-- RTSP Server
 - Configuration storage
 - Complete ONVIF Implementations (Status breakdown will eventually be documented)
 - And a lot more...

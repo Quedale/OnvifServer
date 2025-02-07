@@ -1,15 +1,130 @@
 #include "discovery_service.h"
 #include "soapClient_minimal.h"
 #include "../devicemgmt/device_service.h"
+#include "../common/service_common.h"
 #include "clogger.h"
 #include "wsddapi.h"
-#include "wsaapi.h"
+#include "portable_thread.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <byteswap.h>
+struct soap * discovery_soap = NULL;
+int DISCOVERY_QUIT_FLAG = 0;
+int DISCOVERY_STARTED = 0;
+
+typedef struct {
+    int init_done;
+    P_COND_TYPE finish_cond;
+    P_COND_TYPE cond;
+    P_MUTEX_TYPE lock;
+} OnvifSoapInitData;
+
+OnvifSoapInitData * init_data = NULL;
+
+void * 
+OnvifDiscoveryService__thread(void * event){
+    c_log_set_thread_color(ANSI_COLOR_YELLOW, P_THREAD_ID);
+    OnvifSoapInitData ** ptrdata = (OnvifSoapInitData **) event;
+    OnvifSoapInitData * data = *ptrdata;
+
+    P_THREAD_DETACH(P_THREAD_ID); 
+
+    data->init_done = 1;
+    P_COND_BROADCAST(data->cond);
+
+    discovery_soap = ServiceCommon__soap_new1(SOAP_IO_UDP);
+    // discovery_soap->proxy_host = "0.0.0.0";
+    discovery_soap->connect_flags = SO_BROADCAST;
+    SOAP_SOCKET m = soap_bind(discovery_soap, NULL, 3702, 100);
+    if (!soap_valid_socket(m)) {
+        C_ERROR("Failed to bind discovery socket on port 3702");
+        goto exit;
+    }
+
+    struct ip_mreq mcast; 
+    mcast.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
+    mcast.imr_interface.s_addr = htonl(INADDR_ANY);
+
+    if (setsockopt(discovery_soap->master, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mcast, sizeof(mcast))<0) {
+        C_ERROR("UDP group membership failed");
+        goto exit;
+    }
+
+    C_DEBUG("Discovery Service Listening on port 3702");
+    // TODO send Hello;
+    while (!DISCOVERY_QUIT_FLAG) { //TODO Implemented threaded response?
+		if (soap_begin_serve(discovery_soap) && !DISCOVERY_QUIT_FLAG){ //Parse raw HTTP request
+            if (discovery_soap->error >= SOAP_STOP){
+                C_ERROR("Failed to parse discovery request...");
+                continue;
+            }
+		}
+
+        if(OnvifDiscoveryService__serve(discovery_soap) && !DISCOVERY_QUIT_FLAG && discovery_soap->error && discovery_soap->error < SOAP_STOP){
+            print_soap_fault(discovery_soap);
+            C_ERROR("Failed to serve discovery request...");
+            continue;
+        }
+    }
+    // TODO send Bye;
+exit:
+    C_DEBUG("Discovery service terminated");
+    DISCOVERY_QUIT_FLAG = 0;
+    DISCOVERY_STARTED = 0;
+    soap_destroy(discovery_soap); // delete managed class instances 
+    soap_end(discovery_soap);     // delete managed data and temporaries 
+    soap_free(discovery_soap);    // finalize and delete the context
+    discovery_soap = NULL;
+    *ptrdata = NULL;
+
+    P_COND_BROADCAST(data->finish_cond); //broadcast to potentially waiting threads
+    free(data);
+    P_THREAD_EXIT;
+    return NULL; 
+}
+
+void 
+OnvifDiscoveryService__start(){
+    if(DISCOVERY_STARTED){
+        C_ERROR("Discovery Service already running");
+        return;
+    }
+    if(DISCOVERY_QUIT_FLAG){
+        C_ERROR("Discovery Service busy stopping");
+        return;
+    }
+    DISCOVERY_STARTED = 1;
+    P_THREAD_TYPE tid;
+
+    init_data = malloc(sizeof(OnvifSoapInitData));
+    init_data->init_done = 0;
+    P_COND_SETUP(init_data->cond);
+    P_COND_SETUP(init_data->finish_cond);
+    P_MUTEX_SETUP(init_data->lock);
+
+    P_THREAD_CREATE(tid, (void*(*)(void*))OnvifDiscoveryService__thread, &init_data);
+
+    C_TRACE("Waiting for Discovery Service");
+    if(!init_data->init_done) { P_COND_WAIT(init_data->cond, init_data->lock); }
+    P_COND_CLEANUP(init_data->cond);
+    P_MUTEX_CLEANUP(init_data->lock);
+}
+
+void 
+OnvifDiscoveryService__stop(){
+    if(!DISCOVERY_STARTED){
+        C_ERROR("Discovery Service isn't running");
+        return;
+    }
+    if(DISCOVERY_QUIT_FLAG){
+        C_ERROR("Discovery Service already stopping");
+        return;
+    }
+    DISCOVERY_QUIT_FLAG = 1;
+    if(discovery_soap){
+        C_WARN("Stopping Discovery service");
+        shutdown(discovery_soap->master, SHUT_RDWR);
+        if(init_data != NULL) { P_COND_WAIT(init_data->finish_cond, init_data->lock); }
+    }
+}
 
 /**
  * C++ version 0.4 char* style "itoa":
@@ -41,36 +156,12 @@ itoa(char* result, int value, int base) {
     return result;
 }
 
-static char *
-get_ip_str(const struct sockaddr *sa, char *s, size_t maxlen){
-    switch(sa->sa_family) {
-        case AF_INET:
-            inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr),s, maxlen);
-            break;
-        case AF_INET6:
-            inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr),s, maxlen);
-            break;
-        default:
-            strncpy(s, "Unknown AF", maxlen);
-            return NULL;
-    }
-    return s;
-}
 
 /*
     Server-sided logic
 */
 soap_wsdd_mode 
 wsdd_event_Probe(struct soap *soap, const char *MessageID, const char *ReplyTo, const char *Types, const char *Scopes, const char *MatchBy, struct wsdd__ProbeMatchesType *ProbeMatches){
-    int ipv4_max_len = 15;
-    char client_ip[ipv4_max_len];
-    get_ip_str(&soap->peer.addr,client_ip,ipv4_max_len);
-    C_DEBUG("ONVIF Discovery Probe from %s", client_ip);
-	C_TRACE("  MessageID: %s\n", MessageID);
-	C_TRACE("  ReplyTo: %s\n", ReplyTo);
-	C_TRACE("  Types: %s\n", Types);
-	C_TRACE("  Scopes: %s\n", Scopes);
-	C_TRACE("  MatchBy: %s\n", MatchBy);
 
     unsigned char bytes[4];
     bytes[0] = soap->ip & 0xFF;
@@ -78,30 +169,30 @@ wsdd_event_Probe(struct soap *soap, const char *MessageID, const char *ReplyTo, 
     bytes[2] = (soap->ip >> 16) & 0xFF;
     bytes[3] = (soap->ip >> 24) & 0xFF;  
 
+    C_DEBUG("Discovery Probe from %d.%d.%d.%d", (int)bytes[3], (int)bytes[2], (int)bytes[1], (int)bytes[0]);
+	C_TRACE("  MessageID: %s\n", MessageID);
+	C_TRACE("  ReplyTo: %s\n", ReplyTo);
+	C_TRACE("  Types: %s\n", Types);
+	C_TRACE("  Scopes: %s\n", Scopes);
+	C_TRACE("  MatchBy: %s\n", MatchBy);
+
+    char hostname_struct[1024];
+    hostname_struct[1023] = '\0';
+    gethostname(hostname_struct, 1023);
+    struct hostent* h;
+    h = gethostbyname(hostname_struct);
+
+    //TODO Add extra match with IP address instead of hostname
+    int hostname_len = strlen(h->h_name);
     int port_len = sizeof(char)*(int)log10(soap->proxy_port)+1;
     int proto_len = strlen("http");
     int path_len = strlen(ONVIF_DEVICE_SERVICE_PATH);
-    char * service_endpoint = soap_malloc(soap, proto_len + 3 + ipv4_max_len + 1 + port_len + path_len+1);
+    char * service_endpoint = soap_malloc(soap, proto_len + 3 + hostname_len + 1 + port_len + path_len+1);
     strcpy(service_endpoint,"http");
     strcat(service_endpoint,"://");
-
-    char bytestr[5];
-    itoa(bytestr, (int)bytes[3], 10);
-    strcat(service_endpoint,bytestr);
-    strcat(service_endpoint,".");
-
-    itoa(bytestr, (int)bytes[2], 10);
-    strcat(service_endpoint,bytestr);
-    strcat(service_endpoint,".");
-
-    itoa(bytestr, (int)bytes[1], 10);
-    strcat(service_endpoint,bytestr);
-    strcat(service_endpoint,".");
-
-    itoa(bytestr, (int)bytes[0], 10);
-    strcat(service_endpoint,bytestr);
+    strcat(service_endpoint,h->h_name);
     strcat(service_endpoint,":");
-
+    char bytestr[5];
     itoa(bytestr, soap->proxy_port, 10);
     strcat(service_endpoint,bytestr);
     strcat(service_endpoint,ONVIF_DEVICE_SERVICE_PATH);

@@ -1,5 +1,7 @@
 #!/bin/bash
-SKIP=0
+ENABLE_LATEST=0   #Force using latest gstreamer build and static link.    enabled using --enable-latest
+ENABLE_LIBAV=0    #Enables building and linking Gstreamer libav plugin.   enabled using --enable-libav
+ENABLE_NVCODEC=0  #Enables building and linking Gstreamer nvidia pluging. enabled using --enable-nvcodec
 ENABLE_DEBUG=1    #Disables debug build flag.  
 NO_DOWNLOAD=0
 WGET_CMD="wget"   #Default wget command. Gets properly initialized later with parameters adequate for its version
@@ -414,7 +416,6 @@ buildMakeProject(){
 
   if [ ! -z "${autoreconf}" ] 
   then
-    printlines project="${project}" task="autoreconf" msg="src: ${srcdir}"
     unbufferCall "autoreconf ${autoreconf}" 2>&1 | printlines project="${project}" task="autoreconf"
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       printError project="${project}" task="autoreconf" msg="Autoreconf failed ${srcdir}"
@@ -861,6 +862,62 @@ mkdir -p "$SRC_CACHE_DIR"
 
 cd "$SUBPROJECT_DIR"
 
+
+VENV_EXEC=""
+if [ ! -z "$(progVersionCheck project="virtualenv" program=virtualenv)" ]; then
+  if [ $NO_DOWNLOAD -eq 0 ] && [ ! -f "virtualenv.pyz" ]; then
+    $WGET_CMD https://bootstrap.pypa.io/virtualenv.pyz 2>&1 | printlines project="virtualenv" task="wget"
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+      printError project="virtualenv" task="wget" msg="failed to fetch https://bootstrap.pypa.io/virtualenv.pyz"
+      exit 1;
+    fi
+  fi
+  VENV_EXEC="python3 virtualenv.pyz"
+else
+  VENV_EXEC="virtualenv"
+fi
+
+#Setting up Virtual Python environment
+if [ ! -f "./venvfolder/bin/activate" ]; then
+  $VENV_EXEC ./venvfolder 2>&1 | printlines project="virtualenv" task="setup"
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    printError project="virtualenv" task="setup" msg="failed to run python3 virtualenv.pyz"
+    exit 1;
+  fi
+else
+  printlines project="virtualenv" task="check" msg="found"
+fi
+
+#Activate virtual environment
+if [[ ! -f "venvfolder/bin/activate" ]]; then
+  printError project="virtualenv" task="activate" msg="failed to activate python virtual environment."
+  exit 1;
+else
+  source venvfolder/bin/activate 
+  printlines project="virtualenv" task="activate" msg="activated python virtual environment."
+fi
+
+#Setup meson
+if [ $NO_DOWNLOAD -eq 0 ]; then
+  if [ ! -z "$(progVersionCheck project="meson" program=meson linenumber=1 lineindex=0 major=1 minor=1)" ]; then
+    unbufferCall "python3 -m pip install --progress-bar on meson --upgrade" 2>&1 | printlines project="meson" task="pip"
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+      printError project="meson" task="install" msg="Failed to install meson via pip. Please try to install meson manually."
+      exit 1
+    fi
+  fi
+
+  if [ ! -z "$(progVersionCheck project="ninja" program=ninja)" ]; then
+    unbufferCall "python3 -m pip install --progress-bar on ninja --upgrade" 2>&1 | printlines project="ninja" task="pip"
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+      printError project="ninja" task="check" msg="Failed to install ninja via pip. Please try to install ninja manually."
+      exit 1
+    fi
+  fi
+else
+  printlines project="onvifmgr" task="check" msg="Skipping pip install. NO_DOWNLOAD is set."
+fi
+
 export ACLOCAL_PATH="$ACLOCAL_PATH:/usr/share/aclocal" #When using locally built autoconf, we need to add system path
 export PKG_CONFIG_PATH=$PKG_CONFIG_PATH:"$(pkg-config --variable pc_path pkg-config)" #When using locally built pkgconf, we need to add system path
 
@@ -954,17 +1011,15 @@ fi
 # downloadAndExtract file="24.06.tar.gz" path="https://github.com/onvif/specs/archive/refs/tags/24.06.tar.gz"
 # if [ $FAILED -eq 1 ]; then exit 1; fi
 
-#Get out of subproject folder
-cd ..
-
-
-echo "Generating WSDL gsoap files..."
 if [ ! -f $SUBPROJECT_DIR/../src/generated/onvif.h ]; then
-  mkdir $SUBPROJECT_DIR/../src/generated
-  wsdl2h -Ow4 -t$SUBPROJECT_DIR/../wsdl/typemap.dat -o $SUBPROJECT_DIR/../src/generated/onvif.h -cg \
-      ./wsdl/onvif/wsdl/devicemgmt.wsdl \
-      ./wsdl/onvif/wsdl/media.wsdl \
-      ./wsdl/onvif/wsdl/remotediscovery.wsdl 
+  printlines project="gsoap" task="wsdl" msg="Generating WSDL gsoap files..."
+  cd $SCRT_DIR #Go back to to root folder so that gsoap include works properly
+
+  mkdir $SCRT_DIR/src/generated
+  wsdl2h -Ow4 -t$SCRT_DIR/wsdl/typemap.dat -o $SCRT_DIR/src/generated/onvif.h -cg \
+      $SCRT_DIR/wsdl/onvif/wsdl/devicemgmt.wsdl \
+      $SCRT_DIR/wsdl/onvif/wsdl/media.wsdl \
+      $SCRT_DIR/wsdl/onvif/wsdl/remotediscovery.wsdl 2>&1 | printlines project="gsoap" task="wsdl2h"
       # ./wsdl/onvif/wsdl/event.wsdl \
       # ./wsdl/onvif/wsdl/deviceio.wsdl \
       # ./wsdl/onvif/wsdl/imaging.wsdl \
@@ -992,9 +1047,9 @@ if [ ! -f $SUBPROJECT_DIR/../src/generated/onvif.h ]; then
       # http://www.onvif.org/onvif/ver20/ptz/wsdl/ptz.wsdl \
       # http://www.onvif.org/onvif/ver10/network/wsdl/remotediscovery.wsdl \
       # http://www.onvif.org/ver10/advancedsecurity/wsdl/advancedsecurity.wsdl
-  ret=$?
-  if [ $ret != 0 ]; then
-    rm -rf $SUBPROJECT_DIR/../src/generated
+
+  if [ ${PIPESTATUS[0]} != 0 ]; then
+    rm -rf $SCRT_DIR/src/generated
     printf "${RED}*****************************\n${NC}"
     printf "${RED}*** Failed to generate gsoap C header file ${srcdir} ***\n${NC}"
     printf "${RED}*****************************\n${NC}"
@@ -1007,13 +1062,507 @@ if [ ! -f $SUBPROJECT_DIR/../src/generated/onvif.h ]; then
   # http://www.onvif.org/onvif/ver10/replay.wsdl \
   # http://www.onvif.org/onvif/ver20/analytics/wsdl/analytics.wsdl \
   # http://www.onvif.org/onvif/ver10/analyticsdevice.wsdl \ 
-  soapcpp2 -n -ponvifsoap -f100 -SL -x -c -2 -I$GSOAP_SRC_DIR/gsoap/import:$GSOAP_SRC_DIR/gsoap $SUBPROJECT_DIR/../src/generated/onvif.h -d$SUBPROJECT_DIR/../src/generated
-  ret=$?
-  if [ $ret != 0 ]; then
-    rm -rf $SUBPROJECT_DIR/../src/generated
+  soapcpp2 -n -ponvifsoap -f100 -SL -x -c -2 -I$GSOAP_SRC_DIR/gsoap/import:$GSOAP_SRC_DIR/gsoap $SCRT_DIR/src/generated/onvif.h -d$SCRT_DIR/src/generated 2>&1 | printlines project="gsoap" task="soapcpp2"
+  if [ ${PIPESTATUS[0]} != 0 ]; then
+    rm -rf $SCRT_DIR/src/generated
     printf "${RED}*****************************\n${NC}"
     printf "${RED}*** Failed to generate gsoap C code ${srcdir} ***\n${NC}"
     printf "${RED}*****************************\n${NC}"
     exit 1;
   fi
+  cd "$SUBPROJECT_DIR"
+else
+  printlines project="gsoap" task="wsdl" msg="WSDL gsoap files already generated..."
 fi
+
+################################################################
+# 
+#    Build Gstreamer dependency
+#       sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+################################################################
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/FFmpeg/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/gstreamer/build_omx/dist/lib/gstreamer-1.0/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/gstreamer/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/gstreamer/build/dist/lib/gstreamer-1.0/pkgconfig":$PKG_CONFIG_PATH
+
+gst_ret=0
+GSTREAMER_LATEST=1.24.8
+if [ $ENABLE_LATEST == 0 ]; then
+  GSTREAMER_VERSION=1.14.4
+else
+  GSTREAMER_VERSION=$GSTREAMER_LATEST
+fi
+
+gst_core=(
+  "gstreamer-1.0;gstreamer-1.0"
+  "gstreamer-plugins-base-1.0;gstreamer-plugins-base-1.0"
+  "gstreamer-plugins-good-1.0;gstreamer-plugins-good-1.0" #For some reason this doesn't come out? Relying on plugins
+  "gstreamer-plugins-bad-1.0;gstreamer-plugins-bad-1.0"
+  "gstreamer-rtsp-server-1.0;gstreamer-rtsp-server-1.0"
+)
+
+gst_base_plugins=(
+    "app;gstapp"
+    "typefind;gsttypefindfunctions"
+    "audiotestsrc;gstaudiotestsrc"
+    "videotestsrc;gstvideotestsrc"
+    # "playback;gstplayback" #??
+    # "alsa;gstalsa"  #Check if alsa is installed first
+    "videoconvertscale;gstvideoconvertscale"
+    "videorate;gstvideorate"
+    "rawparse;gstrawparse"
+    "pbtypes;gstpbtypes"
+    "audioresample;gstaudioresample"
+    "audioconvert;gstaudioconvert"
+    "volume;gstvolume"
+    "tcp;gsttcp"
+  )
+gst_good_plugins=(
+    "rtsp;gstrtsp"
+    "rtp;gstrtp"
+    "rtpmanager;gstrtpmanager" #?
+    "law;gstmulaw"
+    "law;gstalaw"
+    "autodetect;gstautodetect" #?
+    "interleave;gstinterleave"
+    "audioparsers;gstaudioparsers"
+    "udp;gstudp"
+    "jpeg;gstjpeg"
+    "v4l2;gstvideo4linux2"
+    
+    # "debugutils"  # This is to support v4l2h264enc element with capssetter #Workaround https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1056
+    # "png" # This is required for the snapshot feature
+)
+
+gst_bad_plugins=(
+    "interlace;gstinterlace"
+    "openh264;gstopenh264"
+    "fdkaac;gstfdkaac"
+    "videoparsers;gstvideoparsersbad"
+    "onvif;gstrtponvif"
+    "jpegformat;gstjpegformat"
+    "v4l2codecs;gstv4l2codecs"
+    "libde265;gstde265"
+)
+if [ $ENABLE_NVCODEC != 0 ]; then gst_bad_plugins+=("nvcodec;gstnvcodec"); fi
+
+checkGstreamerPkg () {
+  local static version project # reset first
+  local "${@}"
+
+  gstpkgret=0;
+  if [ -z "${static}" ]; then
+    for gst_p in ${gst_core[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      if [ ! -z "$(pkgCheck project=${arr[0]} name=${arr[1]} minver=${version})" ]; then
+        printf "  missing core package ${arr[0]} >= ${version}\n";
+      fi
+    done
+  else
+    for gst_p in ${gst_base_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      if [ ! -z "$(pkgCheck project=${project}-${arr[0]} name=${arr[1]} minver=${version})" ]; then
+        printf "  missing base plugin ${arr[0]} >= ${version}\n";
+      fi
+    done
+    for gst_p in ${gst_good_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      if [ ! -z "$(pkgCheck project=${project}-${arr[0]} name=${arr[1]} minver=${version})" ]; then
+        printf "  missing good plugin ${arr[0]} >= ${version}\n";
+      fi
+    done
+    for gst_p in ${gst_bad_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      if [ ! -z "$(pkgCheck project=${project}-${arr[0]} name=${arr[1]} minver=${version})" ]; then
+        printf "  missing bad plugin ${arr[0]} >= ${version}\n";
+      fi
+    done
+  fi
+}
+
+#Gstreamer install on system doesn't break down by plugin, but groups them under base,good,bad,ugly
+if [ ! -z "$(checkGstreamerPkg project="gstreamer" version=$GSTREAMER_VERSION)" ]; then
+  gst_ret=1;
+fi
+
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/pulseaudio/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libde265/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libX11-1.8.10/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/macros/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/systemd-256/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libgudev/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libcap/dist/lib64/pkgconfig":"$SUBPROJECT_DIR/libcap/dist/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/util-linux/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libsndfile/dist/lib/pkgconfig":"$SUBPROJECT_DIR/libsndfile/dist/lib64/pkgconfig":$PKG_CONFIG_PATH
+export PATH="$SUBPROJECT_DIR/gperf-3.1/dist/bin":$PATH
+export PATH="$SUBPROJECT_DIR/nasm-2.16.03/dist/bin":$PATH
+export PATH="$SUBPROJECT_DIR/FFmpeg/dist/bin":$PATH
+export ACLOCAL_PATH="$SUBPROJECT_DIR/macros/dist/lib/aclocal":$ACLOCAL_PATH
+export ACLOCAL_PATH="$SUBPROJECT_DIR/libxtrans/dist/share/aclocal":$ACLOCAL_PATH
+export PKG_CONFIG_PATH="$SUBPROJECT_DIR/libxtrans/dist/share/pkgconfig":$PKG_CONFIG_PATH
+
+#Check to see if gstreamer exist on the system
+if [ $gst_ret != 0 ] || [ $ENABLE_LATEST != 0 ]; then
+  gst_ret=0;
+  GSTREAMER_VERSION=$GSTREAMER_LATEST; #If we are to build something, build latest
+  #Gstreamer static plugins needs to be checked individually
+  if [ ! -z "$(checkGstreamerPkg project="gstreamer" version=$GSTREAMER_VERSION static=true)" ]; then
+    gst_ret=1;
+  fi
+  if [ $ENABLE_LIBAV -eq 1 ] && [ ! -z "$(pkgCheck project="gstreamer-libav" name=gstlibav minver=$GSTREAMER_VERSION)" ]; then
+    gst_ret=1;
+  fi
+
+  #Global check if gstreamer is already built
+  if [ $gst_ret != 0 ]; then
+    checkGetTextAndAutoPoint
+
+    ################################################################
+    # 
+    #    Build gudev-1.0 dependency
+    #   sudo apt install libgudev-1.0-dev (tested 232)
+    # 
+    ################################################################
+    if [ ! -z "$(pkgCheck project="gudev" name=gudev-1.0 minver=232)" ]; then
+      if [ ! -z "$(progVersionCheck project="gperf" program=gperf)" ]; then
+        downloadAndExtract project="gperf" file="gperf-3.1.tar.gz" path="http://ftp.gnu.org/pub/gnu/gperf/gperf-3.1.tar.gz"
+        buildMakeProject project="gperf" srcdir="gperf-3.1" prefix="$SUBPROJECT_DIR/gperf-3.1/dist" autogen="skip"
+      fi
+
+      if [ ! -z "$(pkgCheck project="libcap" name=libcap minver=2.32)" ]; then
+        #old link git://git.kernel.org/pub/scm/linux/kernel/git/morgan/libcap.git
+        pullOrClone project="libcap" path=https://kernel.googlesource.com/pub/scm/libs/libcap/libcap tag=libcap-2.69
+        buildMakeProject project="libcap" srcdir="libcap" prefix="$SUBPROJECT_DIR/libcap/dist" installargs="DESTDIR='$SUBPROJECT_DIR/libcap/dist'"
+      fi
+
+      #TODO build autopoint... (Mint linux)
+      if [ ! -z "$(pkgCheck project="mount" name=mount minver=2.34.0)" ]; then
+        pullOrClone project="mount" path=https://github.com/util-linux/util-linux.git tag=v2.38.1
+        buildMakeProject project="mount" srcdir="util-linux" prefix="$SUBPROJECT_DIR/util-linux/dist" configure="--disable-rpath --disable-bash-completion --disable-makeinstall-setuid --disable-makeinstall-chown"
+      fi
+
+      python3 -c 'from setuptools import setup'
+      if [ $? != 0 ]; then
+        printlines project="setuptools" task="check" msg="not found"
+        unbufferCall "python3 -m pip install --progress-bar on setuptools --upgrade" 2>&1 | printlines project="setuptools" task="pip"
+        if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+          printError project="setuptools" task="install" msg="Failed to setuptools ninja via pip. Please try to install setuptools manually."
+          exit 1
+        fi
+      else
+        printlines project="setuptools" task="check" msg="found"
+      fi
+
+      python3 -c 'import jinja2' 2> /dev/null
+      ret=$?
+      if [ $ret != 0 ]; then
+        printlines project="jinja2" task="jinja2" msg="not found"
+        unbufferCall "python3 -m pip install --progress-bar on jinja2 --upgrade" 2>&1 | printlines project="jinja2" task="pip"
+        if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+          printError project="jinja2" task="install" msg="Failed to jinja2 ninja via pip. Please try to install jinja2 manually."
+          exit 1
+        fi
+      else
+        printlines project="jinja2" task="check" msg="found"
+      fi
+
+      if [ ! -z "$(pkgCheck project="udev" name=libudev minver=256)" ]; then
+        SYSD_MESON_ARGS="-Dauto_features=disabled"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dmode=developer"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-udev-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-systemctl-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-networkd-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-timesyncd-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-journalctl-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlink-boot-shared=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dfirst-boot-full-preset=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dstatic-libsystemd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dstatic-libudev=true"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dstandalone-binaries=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dinitrd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dcompat-mutable-uid-boundaries=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnscd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Ddebug-shell=''"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Ddebug-tty=''"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dutmp=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dhibernate=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dldconfig=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dresolve=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Defi=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtpm=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Denvironment-d=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dbinfmt=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Drepart=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsysupdate=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dcoredump=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dpstore=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Doomd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlogind=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dhostnamed=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlocaled=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dmachined=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dportabled=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsysext=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Duserdb=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dhomed=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnetworkd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtimedated=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtimesyncd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dremote=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dcreate-log-dirs=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnss-myhostname=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnss-mymachines=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnss-resolve=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dnss-systemd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Drandomseed=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dbacklight=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dvconsole=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dquotacheck=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsysusers=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtmpfiles=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dimportd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dhwdb=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Drfkill=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dxdg-autostart=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dman=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dhtml=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtranslations=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dinstall-sysconfdir=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dseccomp=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dselinux=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dapparmor=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsmack=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dpolkit=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dima=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dacl=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Daudit=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dblkid=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dfdisk=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dkmod=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dpam=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dpwquality=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dmicrohttpd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibcryptsetup=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibcurl=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Didn=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibidn2=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibidn=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibiptc=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dqrencode=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dgcrypt=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dgnutls=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dopenssl=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dcryptolib=auto"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dp11kit=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlibfido2=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtpm2=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Delfutils=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dzlib=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dbzip2=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dxz=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlz4=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dzstd=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dxkbcommon=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dpcre2=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dglib=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Ddbus=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dtests=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Durlify=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Danalyze=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dbpf-framework=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dkernel-install=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsysvinit-path='$SUBPROJECT_DIR/systemd-256/build/dist/init.d'"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dbashcompletiondir='$SUBPROJECT_DIR/systemd-256/build/dist/bash-completion'"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dcreate-log-dirs=false"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dlocalstatedir='$SUBPROJECT_DIR/systemd-256/build/dist/localstate'"
+        SYSD_MESON_ARGS="$SYSD_MESON_ARGS -Dsshconfdir='$SUBPROJECT_DIR/systemd-256/build/dist/sshcfg'"
+        downloadAndExtract project="udev" file="v256.tar.gz" path="https://github.com/systemd/systemd/archive/refs/tags/v256.tar.gz"
+        C_INCLUDE_PATH="$SUBPROJECT_DIR/libcap/dist/usr/include" \
+        LIBRARY_PATH="$SUBPROJECT_DIR/libcap/dist/lib64":"$SUBPROJECT_DIR/libcap/dist":$LIBRARY_PATH \
+        buildMesonProject project="udev" srcdir="systemd-256" prefix="$SUBPROJECT_DIR/systemd-256/build/dist" mesonargs="$SYSD_MESON_ARGS"
+      fi
+
+      pullOrClone project="gudev" path=https://gitlab.gnome.org/GNOME/libgudev.git tag=237
+      C_INCLUDE_PATH="$SUBPROJECT_DIR/systemd-256/build/dist/include" \
+      LIBRARY_PATH="$SUBPROJECT_DIR/libcap/dist/lib64":"$SUBPROJECT_DIR/systemd-256/build/dist/lib" \
+      buildMesonProject project="gudev" srcdir="libgudev" prefix="$SUBPROJECT_DIR/libgudev/build/dist" mesonargs="-Dvapi=disabled -Dtests=disabled -Dintrospection=disabled"
+    fi
+
+    ################################################################
+    # 
+    #    Build libpulse dependency
+    #   sudo apt install libpulse-dev (tested 12.2)
+    # 
+    ################################################################
+    # if [ ! -z "$(pkgCheck project="pulse" name=libpulse minver=12.2)" ]; then
+    #   gst_good_plugins+=("pulse;gstpulseaudio");
+    #   # if [ ! -z "$(pkgCheck project="sndfile" name=sndfile minver=1.2.0)" ]; then
+    #   #   LIBSNDFILE_CMAKEARGS="-DBUILD_EXAMPLES=off"
+    #   #   LIBSNDFILE_CMAKEARGS="$LIBSNDFILE_CMAKEARGS -DBUILD_TESTING=off"
+    #   #   LIBSNDFILE_CMAKEARGS="$LIBSNDFILE_CMAKEARGS -DBUILD_SHARED_LIBS=on"
+    #   #   LIBSNDFILE_CMAKEARGS="$LIBSNDFILE_CMAKEARGS -DINSTALL_PKGCONFIG_MODULE=on"
+    #   #   LIBSNDFILE_CMAKEARGS="$LIBSNDFILE_CMAKEARGS -DINSTALL_MANPAGES=off"
+    #   #   pullOrClone project="sndfile" path="https://github.com/libsndfile/libsndfile.git" tag=1.2.0
+    #   #   mkdir "libsndfile/build"
+    #   #   buildMakeProject project="sndfile" srcdir="libsndfile/build" prefix="$SUBPROJECT_DIR/libsndfile/dist" cmakedir=".." cmakeargs="$LIBSNDFILE_CMAKEARGS"
+    #   # fi
+
+    #   # PULSE_MESON_ARGS="-Ddaemon=false"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Ddoxygen=false"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Dman=false"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Dtests=false"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Ddatabase=simple"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Dbashcompletiondir=no"
+    #   # PULSE_MESON_ARGS="$PULSE_MESON_ARGS -Dzshcompletiondir=no"
+    #   # pullOrClone project="pulse" path="https://gitlab.freedesktop.org/pulseaudio/pulseaudio.git" tag=v16.1
+    #   # buildMesonProject project="pulse" srcdir="pulseaudio" prefix="$SUBPROJECT_DIR/pulseaudio/build/dist" mesonargs="$PULSE_MESON_ARGS"
+    # fi
+
+    ################################################################
+    # 
+    #    Build audio dependency
+    #     For the time being hardcoded for alsasrc until handling for pulsesrc is added
+    # 
+    ################################################################
+    # if [ -z "$(pkgCheck project="pulse" name=libpulse minver=12.2)" ]; then
+    #   gst_good_plugins+=("pulse;gstpulseaudio");
+    # else 
+      export PKG_CONFIG_PATH="$SUBPROJECT_DIR/alsa-lib/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+      if [ ! -z "$(pkgCheck project="alsa" name=alsa)" ]; then
+        pullOrClone project="alsa" path="https://github.com/alsa-project/alsa-lib.git" tag=v1.2.13
+        buildMakeProject project="alsa" srcdir="alsa-lib" prefix="$SUBPROJECT_DIR/alsa-lib/dist" configure="" autoreconf="-if"
+      fi
+      gst_base_plugins+=("alsa;gstalsa");
+    #   # Add tinyalsa fallback subproject
+    #   # echo "[wrap-git]" > gstreamer/subprojects/tinyalsa.wrap
+    #   # echo "directory=tinyalsa" >> gstreamer/subprojects/tinyalsa.wrap
+    #   # echo "url=https://github.com/tinyalsa/tinyalsa.git" >> gstreamer/subprojects/tinyalsa.wrap
+    #   # echo "revision=v2.0.0" >> gstreamer/subprojects/tinyalsa.wrap
+    #   MESON_PARAMS="$MESON_PARAMS -Dgst-plugins-bad:tinyalsa=enabled"
+    #   export PKG_CONFIG_PATH="$SUBPROJECT_DIR/tinyalsa/build/dist/lib/pkgconfig":$PKG_CONFIG_PATH
+    #   export C_INCLUDE_PATH="$(pkg-config --variable=includedir tinyalsa)":$C_INCLUDE_PATH
+
+    #   if [ ! -z "$(pkgCheck project="tinyalsa" name=tinyalsa minver=2.0.0)" ]; then
+    #     pullOrClone project="tinyalsa" path="https://github.com/tinyalsa/tinyalsa.git" tag=v2.0.0
+    #     buildMesonProject project="tinyalsa" srcdir="tinyalsa" prefix="$SUBPROJECT_DIR/tinyalsa/build/dist" mesonargs=""
+    #   fi
+    #   # mkdir "tinyalsa/build"
+    #   # buildMakeProject project="tinyalsa" srcdir="tinyalsa/build" prefix="$SUBPROJECT_DIR/tinyalsa/dist" cmakedir=".." cmakeargs="-DBUILD_SHARED_LIBS=OFF"
+    # fi
+
+    ################################################################
+    # 
+    #    Build nasm dependency
+    #   sudo apt install nasm
+    # 
+    ################################################################
+    if [ ! -z "$(progVersionCheck project="nasm" program=nasm)" ]; then
+      downloadAndExtract project="nasm" file=nasm-2.16.03.tar.gz path=https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.gz
+      buildMakeProject project="nasm" srcdir="nasm-2.16.03" prefix="$SUBPROJECT_DIR/nasm-2.16.03/dist"
+    fi
+
+    if [ ! -z "$(pkgCheck project="libde265" name=libde265 minver=v1.0.15)" ]; then
+      pullOrClone project="libde265" path="https://github.com/strukturag/libde265.git" tag=v1.0.15
+      buildMakeProject project="libde265" srcdir="libde265" prefix="$SUBPROJECT_DIR/libde265/dist" configure="--disable-sherlock265"
+    fi
+
+    if [ ! -z "$(pkgCheck project="x11-xcb" name=x11-xcb minver=1.7.2)" ]; then
+      if [ ! -z "$(pkgCheck project="xmacro" name=xorg-macros minver=1.19.1)" ]; then
+        pullOrClone project="xmacro" path="https://gitlab.freedesktop.org/xorg/util/macros.git" tag="util-macros-1.20.0"
+        buildMakeProject project="xmacro" srcdir="macros" prefix="$SUBPROJECT_DIR/macros/dist" configure="--datarootdir='$SUBPROJECT_DIR/macros/dist/lib'"
+      fi
+
+      if [ ! -z "$(pkgCheck project="xtrans" name=xtrans minver=1.4.0)" ]; then
+        pullOrClone project="xtrans" path="https://gitlab.freedesktop.org/xorg/lib/libxtrans.git" tag="xtrans-1.5.1"
+        buildMakeProject project="xtrans" srcdir="libxtrans" prefix="$SUBPROJECT_DIR/libxtrans/dist"
+      fi
+
+      downloadAndExtract project="x11" file="libX11-1.8.10.tar.xz" path="https://www.x.org/archive/individual/lib/libX11-1.8.10.tar.xz"
+      buildMakeProject project="x11" srcdir="libX11-1.8.10" prefix="$SUBPROJECT_DIR/libX11-1.8.10/build/dist" outoftree="true"
+    fi
+
+    MESON_PARAMS=""
+    if [ $ENABLE_LIBAV -eq 1 ]; then
+        
+        [[ ! -z "$(pkgCheck project="ffmpeg-libavcodec" name=libavcodec minver=58.20.100)" ]] && ret1=1 || ret1=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libavfilter" name=libavfilter minver=7.40.101)" ]] && ret2=1 || ret2=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libavformat" name=libavformat minver=58.20.100)" ]] && ret3=1 || ret3=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libavutil" name=libavutil minver=56.22.100)" ]] && ret4=1 || ret4=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libpostproc" name=libpostproc minver=55.3.100)" ]] && ret5=1 || ret5=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libswresample" name=libswresample minver=3.3.100)" ]] && ret6=1 || ret6=0
+        [[ ! -z "$(pkgCheck project="ffmpeg-libswscale" name=libswscale minver=5.3.100)" ]] && ret7=1 || ret7=0
+
+        if [ $ret1 != 0 ] || [ $ret2 != 0 ] || [ $ret3 != 0 ] || [ $ret4 != 0 ] || [ $ret5 != 0 ] || [ $ret6 != 0 ] || [ $ret7 != 0 ]; then
+            #######################
+            #
+            # Custom FFmpeg build
+            #   For some reason, Gstreamer's meson dep doesn't build any codecs
+            #   
+            #   sudo apt install libavcodec-dev libavfilter-dev libavformat-dev libswresample-dev
+            #######################
+            FFMPEG_CONFIGURE_ARGS="--disable-lzma"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --disable-doc"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --disable-shared"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --enable-static"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --enable-nonfree"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --enable-version3"
+            FFMPEG_CONFIGURE_ARGS="$FFMPEG_CONFIGURE_ARGS --enable-gpl"
+
+            pullOrClone project="ffmpeg" path="https://github.com/FFmpeg/FFmpeg.git" tag=n6.1.1
+            buildMakeProject project="ffmpeg" srcdir="FFmpeg" prefix="$SUBPROJECT_DIR/FFmpeg/dist" configure="$FFMPEG_CONFIGURE_ARGS"
+            rm -rf "$SUBPROJECT_DIR/FFmpeg/dist/lib/*.so"
+        else
+            printlines project="ffmpeg" task="check" msg="found"
+        fi
+        MESON_PARAMS="$MESON_PARAMS -Dlibav=enabled"
+    fi
+
+    pullOrClone project="gstreamer" path="https://gitlab.freedesktop.org/gstreamer/gstreamer.git" tag=$GSTREAMER_VERSION
+    
+    # Force disable subproject features
+    MESON_PARAMS="$MESON_PARAMS -Dglib:tests=false"
+    MESON_PARAMS="$MESON_PARAMS -Dlibdrm:cairo-tests=false"
+    MESON_PARAMS="$MESON_PARAMS -Dx264:cli=false"
+
+    # Gstreamer options
+    MESON_PARAMS="$MESON_PARAMS -Dbase=enabled"
+    MESON_PARAMS="$MESON_PARAMS -Dgood=enabled"
+    MESON_PARAMS="$MESON_PARAMS -Dbad=enabled"
+    MESON_PARAMS="$MESON_PARAMS -Dgpl=enabled"
+    MESON_PARAMS="$MESON_PARAMS -Drtsp_server=enabled"
+
+    for gst_p in ${gst_base_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      MESON_PARAMS+=" -Dgst-plugins-base:${arr[0]}=enabled"
+    done
+    for gst_p in ${gst_good_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      MESON_PARAMS+=" -Dgst-plugins-good:${arr[0]}=enabled"
+    done
+    for gst_p in ${gst_bad_plugins[@]}; do
+      IFS=";" read -r -a arr <<< "${gst_p}"
+      MESON_PARAMS+=" -Dgst-plugins-bad:${arr[0]}=enabled"
+    done
+    MESON_PARAMS="-Dauto_features=disabled $MESON_PARAMS"
+    MESON_PARAMS="--strip $MESON_PARAMS"
+
+    # Add tinyalsa fallback subproject
+    # echo "[wrap-git]" > subprojects/tinyalsa.wrap
+    # echo "directory=tinyalsa" >> subprojects/tinyalsa.wrap
+    # echo "url=https://github.com/tinyalsa/tinyalsa.git" >> subprojects/tinyalsa.wrap
+    # echo "revision=v2.0.0" >> subprojects/tinyalsa.wrap
+    # MESON_PARAMS="$MESON_PARAMS -Dgst-plugins-bad:tinyalsa=enabled"
+
+    LIBRARY_PATH=$LIBRARY_PATH:"$SUBPROJECT_DIR/systemd-256/dist/lib" \
+    buildMesonProject project="gstreamer" srcdir="gstreamer" prefix="$SUBPROJECT_DIR/gstreamer/build/dist" mesonargs="$MESON_PARAMS" builddir="build"
+  else
+      printlines project="latest-gstreamer" task="check" msg="found"
+  fi
+else
+    printlines project="gstreamer" task="check" msg="found"
+fi
+
+
+#Get out of subproject folder
+cd ..

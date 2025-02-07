@@ -5,4 +5,7 @@
 
 int OnvifDiscoveryService__serve(struct soap *soap);
 
+void OnvifDiscoveryService__start();
+void OnvifDiscoveryService__stop();
+
 #endif
