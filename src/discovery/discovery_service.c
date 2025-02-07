@@ -5,6 +5,7 @@
 #include "clogger.h"
 #include "wsddapi.h"
 #include "portable_thread.h"
+#include "wsdd.nsmap"
 
 struct soap * discovery_soap = NULL;
 int DISCOVERY_QUIT_FLAG = 0;
@@ -30,7 +31,7 @@ OnvifDiscoveryService__thread(void * event){
     data->init_done = 1;
     P_COND_BROADCAST(data->cond);
 
-    discovery_soap = ServiceCommon__soap_new1(SOAP_IO_UDP);
+    discovery_soap = ServiceCommon__soap_new1(SOAP_IO_UDP, disco_namespaces);
     // discovery_soap->proxy_host = "0.0.0.0";
     discovery_soap->connect_flags = SO_BROADCAST;
     SOAP_SOCKET m = soap_bind(discovery_soap, NULL, 3702, 100);

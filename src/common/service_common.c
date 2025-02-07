@@ -16,9 +16,9 @@ ServiceCommon__delete_pointer(struct soap *soap, struct soap_clist *p){
 }
 
 struct soap * 
-ServiceCommon__soap_new1(int type){
+ServiceCommon__soap_new1(int type, struct Namespace * namespace){
     struct soap * soap = soap_new1(type);
-    soap_set_namespaces(soap, onvifsoap_namespaces);
+    soap_set_namespaces(soap, namespace);
     soap->bind_flags         = SO_REUSEADDR;
     char *debug_flag = NULL;
 
@@ -36,7 +36,7 @@ ServiceCommon__soap_new1(int type){
 
 struct soap * 
 ServiceCommon__soap_new(){
-    return ServiceCommon__soap_new1(SOAP_IO_DEFAULT);
+    return ServiceCommon__soap_new1(SOAP_IO_DEFAULT, onvifsoap_namespaces);
 }
 
 

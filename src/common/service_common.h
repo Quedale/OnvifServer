@@ -85,5 +85,5 @@ int ServiceCommon__delete_pointer(struct soap *soap, struct soap_clist *p);
   }
 
 struct soap * ServiceCommon__soap_new();
-struct soap * ServiceCommon__soap_new1(int type);
+struct soap * ServiceCommon__soap_new1(int type, struct Namespace * namespace);
 #endif
