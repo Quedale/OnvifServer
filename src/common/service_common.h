@@ -25,7 +25,7 @@
     const char *username = soap_wsse_get_Username(soap); \
     const char *password; \
     if (!username || !strlen(username)){ \
-        C_TRACE("Anonymous authentication attempt"); \
+        C_WARN(#onvif_method" Anonymous authentication attempt"); \
         soap_wsse_delete_Security(soap); \
         return SOAP_FAULT; \
     } \
@@ -86,4 +86,7 @@ int ServiceCommon__delete_pointer(struct soap *soap, struct soap_clist *p);
 
 struct soap * ServiceCommon__soap_new();
 struct soap * ServiceCommon__soap_new1(int type, struct Namespace * namespace);
+char * ServiceCommon__generate_xaddr(struct soap * soap, char * path);
+char* itoa(char* result, int value, int base);
+
 #endif

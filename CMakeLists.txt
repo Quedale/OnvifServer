@@ -1,22 +1,19 @@
 cmake_minimum_required(VERSION 3.5.0)
 project(onvif-device VERSION 0.1.0)
 
-execute_process (
-    COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/autogen.sh"
-    RESULT_VARIABLE ret
-)
-if(ret EQUAL "1")
-    message( FATAL_ERROR "autogen.sh script failed.")
-endif()
-
+set(GSOAP_SRC_DIR ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8 CACHE STRING "Location of the gsoap source directory")
+set(ONVIF_MAX_USERS CACHE STRING "Maximum number of users allowed")
 set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/dist)
 set(LIBRARY_OUTPUT_PATH    ${OUTPUT_DIR})
 set(EXECUTABLE_OUTPUT_PATH ${OUTPUT_DIR})
 
-if (NOT DEFINED GSOAP_SRC_DIR)
-  set(GSOAP_SRC_DIR  ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8)
-endif()
+execute_process (
+    COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/autogen.sh"
+    RESULT_VARIABLE ret)
 
+if(ret EQUAL "1")
+    message( FATAL_ERROR "autogen.sh script failed.")
+endif()
 
 aux_source_directory(src src_dir)
 aux_source_directory(src/common common_dir)
@@ -45,6 +42,10 @@ add_executable(onvifserver
                     ${GSOAP_SRC_DIR}/gsoap/plugin/httpda.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/wsddapi.c
                     ${GSOAP_SRC_DIR}/gsoap/custom/struct_timeval.c)
+
+if (ONVIF_MAX_USERS)
+  target_compile_options(onvifserver PRIVATE "SHELL: -DONVIF_MAX_USERS=${ONVIF_MAX_USERS}")
+endif()
 
 set(GSTREAMER_DEP_LIST               
         gstreamer-1.0>=1.18                 #core

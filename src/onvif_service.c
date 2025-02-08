@@ -9,43 +9,86 @@ struct soap * onvif_soap = NULL;
 int ONVIF_QUIT_FLAG = 0;
 int ONVIF_STARTED = 0;
 
+#define POOLSIZE  (64)      /* size of the thread pool */
+#define QUEUESIZE (1000)    /* max number of waiting jobs in the queue */
+
+static SOAP_SOCKET jobs[QUEUESIZE]; /* job queue with head and tail */
+static int head = 0, tail = 0;
+static P_MUTEX_TYPE queue_lock;    /* mutex for queue ops critical sections */
+static P_COND_TYPE queue_notempty; /* condition variable when queue is empty */
+static P_COND_TYPE queue_notfull;  /* condition variable when queue is full */
+static P_THREAD_TYPE tids[POOLSIZE];                       /* thread pool */
+static int MASTER_TID = 0;
+
+/* add job (socket with pending request) to queue */
+void 
+enqueue(SOAP_SOCKET s){
+  int next;
+  P_MUTEX_LOCK(queue_lock);
+  next = (tail + 1) % QUEUESIZE;
+  while (next == head)
+    P_COND_WAIT(queue_notfull, queue_lock);
+  jobs[tail] = s;
+  tail = next;
+  P_COND_SIGNAL(queue_notempty);
+  P_MUTEX_UNLOCK(queue_lock);
+}
+
+/* remove job (socket with request) from queue */
+SOAP_SOCKET 
+dequeue(){
+  SOAP_SOCKET s;
+  P_MUTEX_LOCK(queue_lock);
+  while (head == tail)
+    P_COND_WAIT(queue_notempty, queue_lock);
+  s = jobs[head];
+  head = (head + 1) % QUEUESIZE;
+  P_COND_SIGNAL(queue_notfull);
+  P_MUTEX_UNLOCK(queue_lock);
+  return s;
+}
+
+/* worker per thread */
 void *
-OnvifService__thread(void* tsoap) {
-    c_log_set_thread_color(ANSI_COLOR_CYAN, P_THREAD_ID);
-    struct soap *soap = (struct soap*)tsoap;
-    P_THREAD_DETACH(P_THREAD_ID); 
-
+OnvifService__thread(void *copy){
+    struct soap *tsoap = (struct soap*)copy;
     int (*serv_func)(struct soap*);
+    if (!tsoap)
+        return NULL;
+    for (;;){
+        tsoap->socket = dequeue();
+        if (!soap_valid_socket(tsoap->socket))
+            break;
 
-	soap->keep_alive = soap->max_keep_alive + 1;
-	do{
-		if (soap->keep_alive > 0 && soap->max_keep_alive > 0)
-			soap->keep_alive--;
-		if (soap_begin_serve(soap)){ //Parse raw HTTP request
-            if (soap->error >= SOAP_STOP)
+		if (soap_begin_serve(tsoap)){ //Parse raw HTTP request
+            if (tsoap->error >= SOAP_STOP)
                 continue;
 			return NULL;
 		}
 
-        if(!strcmp(soap->path,ONVIF_DEVICE_SERVICE_PATH)){
+        if(!strcmp(tsoap->path,ONVIF_DEVICE_SERVICE_PATH)){
             serv_func = OnvifDeviceService__serve;
-        } else if(!strcmp(soap->path,ONVIF_MEDIA_SERVICE_PATH)){
+        } else if(!strcmp(tsoap->path,ONVIF_MEDIA_SERVICE_PATH)){
             serv_func = OnvifMediaService__serve;
         } else {
             C_ERROR("404 service not found.");
-            soap_send_empty_response (soap, 404);
+            soap_send_empty_response (tsoap, 404);
             return NULL;
         }
 
-		if ((serv_func(soap)) && !ONVIF_QUIT_FLAG && soap->error && soap->error < SOAP_STOP)
-			soap_send_fault(soap);
-	} while (soap->keep_alive);
+		if ((serv_func(tsoap)) && !ONVIF_QUIT_FLAG && tsoap->error && tsoap->error < SOAP_STOP)
+			soap_send_fault(tsoap);
 
-    soap_destroy(soap); // delete managed class instances 
-    soap_end(soap);     // delete managed data and temporaries 
-    soap_free(soap);    // finalize and delete the context
+        soap_destroy(tsoap);
+        soap_end(tsoap);
+    }
+    soap_destroy(tsoap);
+    soap_end(tsoap);
+    soap_free(tsoap);
+
+    P_THREAD_DETACH(P_THREAD_ID);
     P_THREAD_EXIT;
-    return NULL; 
+    return NULL;
 }
 
 
@@ -59,45 +102,28 @@ void OnvifService__start(int port){
         return;
     }
     ONVIF_STARTED = 1;
-
+    SOAP_SOCKET m;
+    P_THREAD_TYPE tids[POOLSIZE];
     onvif_soap = ServiceCommon__soap_new();
 
-    onvif_soap->accept_timeout = 24*60*60;             /* quit after 24h of inactivity (optional) */
-    onvif_soap->send_timeout = onvif_soap->recv_timeout = 5; /* max send and receive socket inactivity time (sec) */
+    onvif_soap->send_timeout = onvif_soap->recv_timeout = 5;
     onvif_soap->transfer_timeout = 10;
-    SOAP_SOCKET m, s;
-    struct soap *tsoap;
-    P_THREAD_TYPE tid;
-    
-    // onvif_soap->proxy_host = "0.0.0.0";
-    m = soap_bind(onvif_soap, NULL, port, 2);          /* small backlog queue of 2 to 10 for iterative servers */
-    
-    if (!soap_valid_socket(m)) {
-        print_soap_fault(onvif_soap); 
-        C_FATAL("Failed to bind socket on port %d",port);
-        exit(EXIT_FAILURE);
+
+    P_MUTEX_SETUP(queue_lock);
+    P_COND_SETUP(queue_notempty);
+    P_COND_SETUP(queue_notfull);
+    /* start workers */
+    for (int i = 0; i < POOLSIZE; i++)
+        P_THREAD_CREATE(tids[i], (void*(*)(void*))OnvifService__thread, (void*)soap_copy(onvif_soap));
+
+    m = soap_bind(onvif_soap, NULL, port, 100);
+    if (soap_valid_socket(m)){
+        SOAP_SOCKET s;
+        while (soap_valid_socket(s = soap_accept(onvif_soap))){
+            enqueue(s);
+        }
     }
-
-    C_DEBUG("HTTP Service Listening on port %d",port);
-    while (!ONVIF_QUIT_FLAG){
-        s = soap_accept(onvif_soap); 
-        if (soap_valid_socket(s)){
-            tsoap = soap_copy(onvif_soap);
-            if (!tsoap) 
-                soap_force_closesock(onvif_soap);
-            else
-                while (P_THREAD_CREATE(tid, (void*(*)(void*))OnvifService__thread, (void*)tsoap))
-                    sleep(1); // failed, try again
-
-        } else if (onvif_soap->errnum && !ONVIF_QUIT_FLAG){
-            print_soap_fault(onvif_soap); 
-            sleep(1);
-        } else if (!ONVIF_QUIT_FLAG) {
-            C_ERROR("HTTP Server timed out"); 
-            break; 
-        } 
-    }
-
+    MASTER_TID = P_THREAD_ID;
     soap_destroy(onvif_soap); /* delete deserialized objects */
     soap_end(onvif_soap);     /* delete heap and temp data */
     soap_free(onvif_soap);    /* we're done with the context */
@@ -119,6 +145,21 @@ void OnvifService__stop(){
     ONVIF_QUIT_FLAG = 1;
     if(onvif_soap){
         C_WARN("Stopping HTTP Service");
+        int i;
+        /* stop workers */
+        for (i = 0; i < POOLSIZE; i++)
+            enqueue(SOAP_INVALID_SOCKET);
+        for (i = 0; i < POOLSIZE; i++)
+            P_THREAD_JOIN(tids[i]);
+        
+        //All thread are done. Closing socket
         shutdown(onvif_soap->master, SHUT_RDWR);
+        P_THREAD_JOIN(MASTER_TID);
+        MASTER_TID = 0;
+        //TODO Wait for master thread cleanup
     }
+
+    P_MUTEX_CLEANUP(queue_lock);
+    P_COND_CLEANUP(queue_notempty);
+    P_COND_CLEANUP(queue_notfull);
 }

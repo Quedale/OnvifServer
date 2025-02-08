@@ -1467,21 +1467,6 @@ if [ $gst_ret != 0 ] || [ $ENABLE_LATEST != 0 ]; then
       buildMakeProject project="libde265" srcdir="libde265" prefix="$SUBPROJECT_DIR/libde265/dist" configure="--disable-sherlock265"
     fi
 
-    if [ ! -z "$(pkgCheck project="x11-xcb" name=x11-xcb minver=1.7.2)" ]; then
-      if [ ! -z "$(pkgCheck project="xmacro" name=xorg-macros minver=1.19.1)" ]; then
-        pullOrClone project="xmacro" path="https://gitlab.freedesktop.org/xorg/util/macros.git" tag="util-macros-1.20.0"
-        buildMakeProject project="xmacro" srcdir="macros" prefix="$SUBPROJECT_DIR/macros/dist" configure="--datarootdir='$SUBPROJECT_DIR/macros/dist/lib'"
-      fi
-
-      if [ ! -z "$(pkgCheck project="xtrans" name=xtrans minver=1.4.0)" ]; then
-        pullOrClone project="xtrans" path="https://gitlab.freedesktop.org/xorg/lib/libxtrans.git" tag="xtrans-1.5.1"
-        buildMakeProject project="xtrans" srcdir="libxtrans" prefix="$SUBPROJECT_DIR/libxtrans/dist"
-      fi
-
-      downloadAndExtract project="x11" file="libX11-1.8.10.tar.xz" path="https://www.x.org/archive/individual/lib/libX11-1.8.10.tar.xz"
-      buildMakeProject project="x11" srcdir="libX11-1.8.10" prefix="$SUBPROJECT_DIR/libX11-1.8.10/build/dist" outoftree="true"
-    fi
-
     MESON_PARAMS=""
     if [ $ENABLE_LIBAV -eq 1 ]; then
         

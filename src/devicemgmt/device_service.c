@@ -3,38 +3,6 @@
 #include "../common/service_common.h"
 #include "../media/media_service.h"
 
-char * generated_service_endpoint(struct soap * soap, char * path){
-    int proto_len = strcspn (soap->endpoint,":");
-	int port_len = sizeof(char)*(int)log10(soap->proxy_port)+1;
-
-    char * service_endpoint = soap_malloc(soap, proto_len + 3 + strlen(soap->host) + 1 + port_len + strlen(path)+1);
-
-    strncpy(service_endpoint,soap->endpoint,proto_len);
-    service_endpoint[proto_len] = '\0';
-    strcat(service_endpoint,"://");
-    strcat(service_endpoint,soap->host);
-    strcat(service_endpoint,":");
-
-    int port = soap->proxy_port;
-    int port_start = strlen(service_endpoint);
-    int port_index = port_start;
-    while (port > 0) {
-        service_endpoint[port_index++] = port % 10 + '0';
-        port /= 10;
-    }
-    service_endpoint[port_index] = '\0';
-
-    //Reverse port order
-    for (int j = port_start , k = strlen(service_endpoint) - 1; j < k; j++, k--) {
-        char temp = service_endpoint[j];
-        service_endpoint[j] = service_endpoint[k];
-        service_endpoint[k] = temp;
-    }
-
-    strcat(service_endpoint,path);
-    return service_endpoint;
-}
-
 SOAP_FMAC5 int SOAP_FMAC6 
 __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices, struct _tds__GetServicesResponse *tds__GetServicesResponse){
     C_DEBUG("tds__GetServices");
@@ -66,6 +34,9 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     net_cap->Network->DHCPv6 = xsd__boolean__false_;
     net_cap->Network->__anyAttribute = NULL;
 
+	//For some reason xsd__boolean__true_ doesn't work. Workaround :
+	enum xsd__boolean truue = 1;
+	
     net_cap->Security = soap_new_tds__SecurityCapabilities(soap, 1);
     net_cap->Security->TLS1_x002e0 = xsd__boolean__false_;
     net_cap->Security->TLS1_x002e1 = xsd__boolean__false_;
@@ -78,12 +49,17 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     net_cap->Security->X_x002e509Token = xsd__boolean__false_;
     net_cap->Security->SAMLToken = xsd__boolean__false_;
     net_cap->Security->KerberosToken = xsd__boolean__false_;
-    net_cap->Security->UsernameToken = xsd__boolean__false_;
-    net_cap->Security->HttpDigest = xsd__boolean__false_;
+    net_cap->Security->UsernameToken = &truue;
+    net_cap->Security->HttpDigest = &truue;
     net_cap->Security->RELToken = xsd__boolean__false_;
     net_cap->Security->JsonWebToken = xsd__boolean__false_;
     net_cap->Security->SupportedEAPMethods = xsd__boolean__false_;
-    net_cap->Security->MaxUsers = NULL;
+#ifdef ONVIF_MAX_USERS 
+	int max_users = ONVIF_MAX_USERS;
+	net_cap->Security->MaxUsers = &max_users;
+#else
+	net_cap->Security->MaxUsers = NULL;
+#endif
     net_cap->Security->MaxUserNameLength = NULL;
     net_cap->Security->MaxPasswordLength = NULL;
     net_cap->Security->SecurityPolicies = NULL;
@@ -94,7 +70,7 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     net_cap->System = soap_new_tds__SystemCapabilities(soap, 1);
     net_cap->System->DiscoveryResolve = xsd__boolean__false_;
     net_cap->System->DiscoveryBye = xsd__boolean__false_;
-    net_cap->System->RemoteDiscovery = xsd__boolean__false_;
+    net_cap->System->RemoteDiscovery = &truue;
     net_cap->System->SystemBackup = xsd__boolean__false_;
     net_cap->System->SystemLogging = xsd__boolean__false_;
     net_cap->System->FirmwareUpgrade = xsd__boolean__false_;
@@ -130,7 +106,7 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     service->Version->Major = ONVIF_MEDIA_SERVICE_VERSION_MAJOR;
     service->Version->Minor = ONVIF_MEDIA_SERVICE_VERSION_MINOR;
     service->Namespace = ONVIF_MEDIA_SERVICE_NAMESPACE;
-    service->XAddr = generated_service_endpoint(soap,ONVIF_MEDIA_SERVICE_PATH);
+	service->XAddr = ServiceCommon__generate_xaddr(soap,ONVIF_MEDIA_SERVICE_PATH);
     service->Capabilities = soap_new__tds__Service_Capabilities(soap,1);
     ServiceCommon__serialize_data(soap, soap_write_trt__Capabilities,ret, OnvifMediaService__createCapabilities(soap));
     service->Capabilities->__any = ret;

@@ -10,26 +10,90 @@
 struct soap * discovery_soap = NULL;
 int DISCOVERY_QUIT_FLAG = 0;
 int DISCOVERY_STARTED = 0;
+P_THREAD_TYPE MASTER_TID = 0;
 
-typedef struct {
-    int init_done;
-    P_COND_TYPE finish_cond;
-    P_COND_TYPE cond;
-    P_MUTEX_TYPE lock;
-} OnvifSoapInitData;
+#define ONVIF_NVT_TYPE "\"http://www.onvif.org/ver10/network/wsdl\":NetworkVideoTransmitter"
 
-OnvifSoapInitData * init_data = NULL;
+struct soap *
+OnvifDiscoveryService__new_soap(){
+    struct soap * soap = ServiceCommon__soap_new1(SOAP_IO_UDP, disco_namespaces);
+    // discovery_soap->proxy_host = "0.0.0.0";
+    soap->connect_flags = SO_BROADCAST;
+    SOAP_SOCKET m = soap_bind(soap, NULL, 3702, 100);
+    if (!soap_valid_socket(m)) {
+        C_ERROR("Failed to bind discovery socket on port 3702");
+        return NULL;
+    }
+
+    struct ip_mreq mcast; 
+    mcast.imr_multiaddr.s_addr = inet_addr("239.255.255.250");
+    mcast.imr_interface.s_addr = htonl(INADDR_ANY);
+
+    if (setsockopt(soap->master, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mcast, sizeof(mcast))<0) {
+        C_ERROR("UDP group membership failed");
+        return NULL;
+    }
+    
+    return soap;
+}
+
+void 
+OnvifDiscoveryService__Hello(){
+    C_DEBUG("Sending Discovery Hello");
+    struct soap * soap = OnvifDiscoveryService__new_soap();
+    if(!soap) goto exit;
+
+    if(soap_wsdd_Hello(soap,
+        SOAP_WSDD_ADHOC,      //Mode
+        NULL, //Endpoint
+        soap_wsa_rand_uuid(soap),   //message id
+        NULL, //RelatesTo
+        NULL, //EndpointReference
+        ONVIF_NVT_TYPE, //Type
+        NULL, // Scopes TODO Fill scope
+        NULL,        // MatchBy
+        ServiceCommon__generate_xaddr(soap,ONVIF_DEVICE_SERVICE_PATH),
+        10u) != SOAP_OK){
+            print_soap_fault(soap);
+            C_ERROR("Failed to send bye.");
+    }
+exit:
+    soap_destroy(soap); // delete managed class instances 
+    soap_end(soap);     // delete managed data and temporaries 
+    soap_free(soap);    // finalize and delete the context
+}
+
+/*
+    Bye has its own soap since the original soap closes the socket on shutdown
+*/
+void 
+OnvifDiscoveryService__Bye(){
+    C_DEBUG("Sending Discovery Bye");
+    struct soap * soap = OnvifDiscoveryService__new_soap();
+    if(!soap) goto exit;
+
+    if(soap_wsdd_Bye(soap,
+        SOAP_WSDD_ADHOC,      //Mode
+        NULL, //Endpoint
+        soap_wsa_rand_uuid(soap),   //message id
+        NULL, //ReplyTo
+        ONVIF_NVT_TYPE, //Type
+        NULL, // Scopes TODO Fill scope
+        NULL,        // MatchBy
+        ServiceCommon__generate_xaddr(soap,ONVIF_DEVICE_SERVICE_PATH),
+        10u) != SOAP_OK){
+            print_soap_fault(soap);
+            C_ERROR("Failed to send bye.");
+    }
+exit:
+    soap_destroy(soap); // delete managed class instances 
+    soap_end(soap);     // delete managed data and temporaries 
+    soap_free(soap);    // finalize and delete the context
+}
 
 void * 
-OnvifDiscoveryService__thread(void * event){
+OnvifDiscoveryService__thread(void * nul){
     c_log_set_thread_color(ANSI_COLOR_YELLOW, P_THREAD_ID);
-    OnvifSoapInitData ** ptrdata = (OnvifSoapInitData **) event;
-    OnvifSoapInitData * data = *ptrdata;
-
-    P_THREAD_DETACH(P_THREAD_ID); 
-
-    data->init_done = 1;
-    P_COND_BROADCAST(data->cond);
 
     discovery_soap = ServiceCommon__soap_new1(SOAP_IO_UDP, disco_namespaces);
     // discovery_soap->proxy_host = "0.0.0.0";
@@ -50,7 +114,6 @@ OnvifDiscoveryService__thread(void * event){
     }
 
     C_DEBUG("Discovery Service Listening on port 3702");
-    // TODO send Hello;
     while (!DISCOVERY_QUIT_FLAG) { //TODO Implemented threaded response?
 		if (soap_begin_serve(discovery_soap) && !DISCOVERY_QUIT_FLAG){ //Parse raw HTTP request
             if (discovery_soap->error >= SOAP_STOP){
@@ -65,7 +128,7 @@ OnvifDiscoveryService__thread(void * event){
             continue;
         }
     }
-    // TODO send Bye;
+
 exit:
     C_DEBUG("Discovery service terminated");
     DISCOVERY_QUIT_FLAG = 0;
@@ -74,10 +137,6 @@ exit:
     soap_end(discovery_soap);     // delete managed data and temporaries 
     soap_free(discovery_soap);    // finalize and delete the context
     discovery_soap = NULL;
-    *ptrdata = NULL;
-
-    P_COND_BROADCAST(data->finish_cond); //broadcast to potentially waiting threads
-    free(data);
     P_THREAD_EXIT;
     return NULL; 
 }
@@ -93,20 +152,8 @@ OnvifDiscoveryService__start(){
         return;
     }
     DISCOVERY_STARTED = 1;
-    P_THREAD_TYPE tid;
-
-    init_data = malloc(sizeof(OnvifSoapInitData));
-    init_data->init_done = 0;
-    P_COND_SETUP(init_data->cond);
-    P_COND_SETUP(init_data->finish_cond);
-    P_MUTEX_SETUP(init_data->lock);
-
-    P_THREAD_CREATE(tid, (void*(*)(void*))OnvifDiscoveryService__thread, &init_data);
-
-    C_TRACE("Waiting for Discovery Service");
-    if(!init_data->init_done) { P_COND_WAIT(init_data->cond, init_data->lock); }
-    P_COND_CLEANUP(init_data->cond);
-    P_MUTEX_CLEANUP(init_data->lock);
+    P_THREAD_CREATE(MASTER_TID, (void*(*)(void*))OnvifDiscoveryService__thread, NULL);
+    OnvifDiscoveryService__Hello();
 }
 
 void 
@@ -122,41 +169,12 @@ OnvifDiscoveryService__stop(){
     DISCOVERY_QUIT_FLAG = 1;
     if(discovery_soap){
         C_WARN("Stopping Discovery service");
+        OnvifDiscoveryService__Bye();
         shutdown(discovery_soap->master, SHUT_RDWR);
-        if(init_data != NULL) { P_COND_WAIT(init_data->finish_cond, init_data->lock); }
+        P_THREAD_JOIN(MASTER_TID);
+        MASTER_TID = 0;
     }
 }
-
-/**
- * C++ version 0.4 char* style "itoa":
- * Written by Lukás Chmela
- * Released under GPLv3.
- */
-static char* 
-itoa(char* result, int value, int base) {
-    // check that the base if valid
-    if (base < 2 || base > 36) { *result = '\0'; return result; }
-
-    char* ptr = result, *ptr1 = result, tmp_char;
-    int tmp_value;
-
-    do {
-        tmp_value = value;
-        value /= base;
-        *ptr++ = "zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz" [35 + (tmp_value - value * base)];
-    } while ( value );
-
-    // Apply negative sign
-    if (tmp_value < 0) *ptr++ = '-';
-    *ptr-- = '\0';
-    while(ptr1 < ptr) {
-        tmp_char = *ptr;
-        *ptr--= *ptr1;
-        *ptr1++ = tmp_char;
-    }
-    return result;
-}
-
 
 /*
     Server-sided logic
@@ -177,33 +195,12 @@ wsdd_event_Probe(struct soap *soap, const char *MessageID, const char *ReplyTo, 
 	C_TRACE("  Scopes: %s\n", Scopes);
 	C_TRACE("  MatchBy: %s\n", MatchBy);
 
-    char hostname_struct[1024];
-    hostname_struct[1023] = '\0';
-    gethostname(hostname_struct, 1023);
-    struct hostent* h;
-    h = gethostbyname(hostname_struct);
-
-    //TODO Add extra match with IP address instead of hostname
-    int hostname_len = strlen(h->h_name);
-    int port_len = sizeof(char)*(int)log10(soap->proxy_port)+1;
-    int proto_len = strlen("http");
-    int path_len = strlen(ONVIF_DEVICE_SERVICE_PATH);
-    char * service_endpoint = soap_malloc(soap, proto_len + 3 + hostname_len + 1 + port_len + path_len+1);
-    strcpy(service_endpoint,"http");
-    strcat(service_endpoint,"://");
-    strcat(service_endpoint,h->h_name);
-    strcat(service_endpoint,":");
-    char bytestr[5];
-    itoa(bytestr, soap->proxy_port, 10);
-    strcat(service_endpoint,bytestr);
-    strcat(service_endpoint,ONVIF_DEVICE_SERVICE_PATH);
-
     soap_wsdd_add_ProbeMatch(soap, ProbeMatches,
         soap_wsa_rand_uuid(soap), //EndpointReference
         "tdn:NetworkVideoTransmitter", //Types
         NULL, //Scopes
         NULL, //MatchBy
-        service_endpoint, //XAddrs
+        ServiceCommon__generate_xaddr(soap,ONVIF_DEVICE_SERVICE_PATH), //XAddrs
         10);  //MetadataVersion
                     
     //TODO Fill is client manual probe request
@@ -246,51 +243,6 @@ __tdn__Bye(struct soap* soap, struct wsdd__ByeType tdn__Bye, struct wsdd__Resolv
 SOAP_FMAC5 int SOAP_FMAC6 
 __tdn__Probe(struct soap* soap, struct wsdd__ProbeType tdn__Probe, struct wsdd__ProbeMatchesType *tdn__ProbeResponse){
     C_WARN("__tdn__Probe");
-    return 0;
-}
-
-/*
-    Mandatory client-side stub for the wsdd plugin
-*/
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_send___wsdd__Hello(struct soap *soap, const char *soap_endpoint, const char *soap_action, struct wsdd__HelloType *wsdd__Hello){
-    C_WARN("soap_send___wsdd__Hello");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_send___wsdd__Bye(struct soap *soap, const char *soap_endpoint, const char *soap_action, struct wsdd__ByeType *wsdd__Bye){
-    C_WARN("soap_send___wsdd__Bye");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_send___wsdd__Probe(struct soap *soap, const char *soap_endpoint, const char *soap_action, struct wsdd__ProbeType *wsdd__Probe){
-    C_WARN("soap_send___wsdd__Probe");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_send___wsdd__Resolve(struct soap *soap, const char *soap_endpoint, const char *soap_action, struct wsdd__ResolveType *wsdd__Resolve){
-    C_WARN("soap_send___wsdd__Resolve");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_recv___wsdd__ProbeMatches(struct soap *soap, struct __wsdd__ProbeMatches * probe_matches){
-    C_WARN("soap_recv___wsdd__ProbeMatches");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_recv___wsdd__ResolveMatches(struct soap *soap, struct __wsdd__ResolveMatches * resolve_matches){
-    C_WARN("soap_recv___wsdd__ResolveMatches");
-    return 0;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-soap_send___wsdd__ResolveMatches(struct soap *soap, const char *soap_endpoint, const char *soap_action, struct wsdd__ResolveMatchesType *wsdd__ResolveMatches){
-    C_WARN("soap_send___wsdd__ResolveMatches");
     return 0;
 }
 

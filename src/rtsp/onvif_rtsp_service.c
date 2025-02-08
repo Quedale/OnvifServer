@@ -12,8 +12,7 @@ typedef struct {
     int started;
     char * mount;
     GMainLoop * loop;
-    P_COND_TYPE loop_cond;
-    P_MUTEX_TYPE loop_lock;
+    P_THREAD_TYPE tid;
     GstRTSPServer * server;
     OnvifRtspMediaFactory * factory;
 } OnvifRtspServicePrivate;
@@ -21,7 +20,6 @@ typedef struct {
 typedef struct {
     OnvifRtspService * service;
     int done;
-    P_COND_TYPE * finish_cond;
     P_COND_TYPE cond;
     P_MUTEX_TYPE lock;
 } OnvifRtspServiceInitData;
@@ -54,8 +52,6 @@ OnvifRtspService__class_init (OnvifRtspServiceClass *klass){
 static void
 OnvifRtspService__init (OnvifRtspService *self){
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (self);
-    P_COND_SETUP(priv->loop_cond);
-    P_MUTEX_SETUP(priv->loop_lock);
 
     priv->mount = NULL;
     priv->started = FALSE;
@@ -109,7 +105,6 @@ void * OnvirRtspService__thread(void * event){
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (data->service);
     
     //Keeping location pointer because data won't be value after cond broadcast
-    P_COND_TYPE * finish_cond = data->finish_cond;
     priv->loop = g_main_loop_new (NULL, FALSE);
     data->done = 1;          //Flag that the context and loop are ready
     P_COND_BROADCAST(data->cond);
@@ -120,11 +115,6 @@ void * OnvirRtspService__thread(void * event){
     free(service);
     free(address);
     g_main_loop_run (priv->loop);
-
-    g_main_loop_unref(priv->loop);
-    
-    priv->loop = NULL;            //Setting loop to NULL flags it as finished
-    P_COND_BROADCAST(*finish_cond); //broadcast to potentially waiting threads
 
     P_THREAD_EXIT;
     return NULL;
@@ -158,15 +148,11 @@ void OnvirRtspService__start(OnvifRtspService *self){
 
     OnvifRtspServiceInitData data;
     data.done = 0;
-    data.finish_cond = &priv->loop_cond;
     data.service = self;
     P_COND_SETUP(data.cond);
     P_MUTEX_SETUP(data.lock);
 
-    pthread_t pthread;
-    
-    P_THREAD_CREATE(pthread, OnvirRtspService__thread, &data);
-    P_THREAD_DETACH(pthread);
+    P_THREAD_CREATE(priv->tid, OnvirRtspService__thread, &data);
 
     C_TRACE("Waiting for Gstreamer loop initialization");
     if(!data.done) { P_COND_WAIT(data.cond, data.lock); }
@@ -178,9 +164,10 @@ void OnvirRtspService__stop(OnvifRtspService *self){
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (self);
     if(priv->loop){
         g_main_loop_quit(priv->loop);
-        //Making sure the loop is finished so that session isn't destroyed while an event is running
-        if(priv->loop != NULL) { P_COND_WAIT(priv->loop_cond, priv->loop_lock); }
+        g_main_loop_unref(priv->loop);
         priv->loop = NULL;
+        //Making sure the loop is finished so that session isn't destroyed while an event is running
+        P_THREAD_JOIN(priv->tid);
         g_main_context_unref(g_main_context_default());
     }
 
