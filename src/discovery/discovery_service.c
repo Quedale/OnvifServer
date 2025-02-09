@@ -208,10 +208,10 @@ wsdd_event_Probe(struct soap *soap, const char *MessageID, const char *ReplyTo, 
 }
 
 void wsdd_event_Hello(struct soap *soap, unsigned int InstanceId, const char *SequenceId, unsigned int MessageNumber, const char *MessageID, const char *RelatesTo, const char *EndpointReference, const char *Types, const char *Scopes, const char *MatchBy, const char *XAddrs, unsigned int MetadataVersion)
-{ C_WARN("wsdd_event_Hello"); }
+{ /* C_WARN("wsdd_event_Hello"); */ }
 
 void wsdd_event_Bye(struct soap *soap, unsigned int InstanceId, const char *SequenceId, unsigned int MessageNumber, const char *MessageID, const char *RelatesTo, const char *EndpointReference, const char *Types, const char *Scopes, const char *MatchBy, const char *XAddrs, unsigned int *MetadataVersion)
-{ C_WARN("wsdd_event_Bye"); }
+{ /* C_WARN("wsdd_event_Bye"); */ }
 
 void wsdd_event_ProbeMatches(struct soap *soap, unsigned int InstanceId, const char *SequenceId, unsigned int MessageNumber, const char *MessageID, const char *RelatesTo, struct wsdd__ProbeMatchesType *ProbeMatches)
 {C_WARN("wsdd_event_ProbeMatches");}

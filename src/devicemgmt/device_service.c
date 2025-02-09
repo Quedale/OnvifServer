@@ -2,24 +2,24 @@
 #include "clogger.h"
 #include "../common/service_common.h"
 #include "../media/media_service.h"
+#include "network_utils.h"
 
-SOAP_FMAC5 int SOAP_FMAC6 
-__tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices, struct _tds__GetServicesResponse *tds__GetServicesResponse){
+ONVIF_DEFINE_UNSECURE_METHOD(tds__GetServices)
     C_DEBUG("tds__GetServices");
 
-    tds__GetServicesResponse->__sizeService = 2;
-    tds__GetServicesResponse->Service = soap_new_tds__Service(soap, tds__GetServicesResponse->__sizeService);
+    response->__sizeService = 2;
+    response->Service = soap_new_tds__Service(soap, response->__sizeService);
 
-    tds__GetServicesResponse->Service->__size = 1;
-    tds__GetServicesResponse->Service->__any = NULL;
-    tds__GetServicesResponse->Service->__anyAttribute = NULL;
-    tds__GetServicesResponse->Service->Version = soap_new_tt__OnvifVersion(soap, 1);
-    tds__GetServicesResponse->Service->Version->Major = ONVIF_DEVICE_SERVICE_VERSION_MAJOR;
-    tds__GetServicesResponse->Service->Version->Minor = ONVIF_DEVICE_SERVICE_VERSION_MINOR;
-    tds__GetServicesResponse->Service->Namespace = ONVIF_DEVICE_SERVICE_NAMESPACE;
-    tds__GetServicesResponse->Service->XAddr = soap->endpoint;
+    response->Service->__size = 1;
+    response->Service->__any = NULL;
+    response->Service->__anyAttribute = NULL;
+    response->Service->Version = soap_new_tt__OnvifVersion(soap, 1);
+    response->Service->Version->Major = ONVIF_DEVICE_SERVICE_VERSION_MAJOR;
+    response->Service->Version->Minor = ONVIF_DEVICE_SERVICE_VERSION_MINOR;
+    response->Service->Namespace = ONVIF_DEVICE_SERVICE_NAMESPACE;
+    response->Service->XAddr = soap->endpoint;
     
-    tds__GetServicesResponse->Service->Capabilities = soap_new__tds__Service_Capabilities(soap,1);
+    response->Service->Capabilities = soap_new__tds__Service_Capabilities(soap,1);
 
     struct tds__DeviceServiceCapabilities * net_cap = soap_new_tds__DeviceServiceCapabilities(soap, 1);
     net_cap->Network = soap_new_tds__NetworkCapabilities(soap, 1);
@@ -96,10 +96,10 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     char *ret = NULL;
     ServiceCommon__serialize_data(soap, soap_write_tds__DeviceServiceCapabilities,ret, net_cap);
 
-    tds__GetServicesResponse->Service->Capabilities->__any = ret;
+    response->Service->Capabilities->__any = ret;
 
     //Media Service Capabilities
-    struct tds__Service * service = &tds__GetServicesResponse->Service[1];
+    struct tds__Service * service = &response->Service[1];
     service->__any = NULL;
     service->__anyAttribute = NULL;
     service->Version = soap_new_tt__OnvifVersion(soap, 1);
@@ -110,36 +110,33 @@ __tds__GetServices(struct soap* soap, struct _tds__GetServices *tds__GetServices
     service->Capabilities = soap_new__tds__Service_Capabilities(soap,1);
     ServiceCommon__serialize_data(soap, soap_write_trt__Capabilities,ret, OnvifMediaService__createCapabilities(soap));
     service->Capabilities->__any = ret;
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
-    return SOAP_OK;
-}
-
-SOAP_FMAC5 int SOAP_FMAC6 
-__tds__GetSystemDateAndTime(struct soap* soap, struct _tds__GetSystemDateAndTime *tds__GetSystemDateAndTime, struct _tds__GetSystemDateAndTimeResponse *tds__GetSystemDateAndTimeResponse){
+ONVIF_DEFINE_UNSECURE_METHOD(tds__GetSystemDateAndTime)
     C_DEBUG("tds__GetSystemDateAndTime");
 
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime = soap_new_tt__SystemDateTime(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->DateTimeType = tt__SetDateTimeType__NTP;
+    response->SystemDateAndTime = soap_new_tt__SystemDateTime(soap, 1);
+    response->SystemDateAndTime->DateTimeType = tt__SetDateTimeType__NTP;
     
     time_t utc_now = time( NULL );
     struct tm buf;
     struct tm* utc_tm = gmtime_r(&utc_now, &buf); 
 
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime = soap_new_tt__DateTime(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Time = soap_new_tt__Time(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Time->Hour = utc_tm->tm_hour;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Time->Minute = utc_tm->tm_min;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Time->Second = utc_tm->tm_sec;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Date = soap_new_tt__Date(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Date->Day = utc_tm->tm_mday;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Date->Month = utc_tm->tm_mon +1;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->UTCDateTime->Date->Year = utc_tm->tm_year + 1900;
+    response->SystemDateAndTime->UTCDateTime = soap_new_tt__DateTime(soap, 1);
+    response->SystemDateAndTime->UTCDateTime->Time = soap_new_tt__Time(soap, 1);
+    response->SystemDateAndTime->UTCDateTime->Time->Hour = utc_tm->tm_hour;
+    response->SystemDateAndTime->UTCDateTime->Time->Minute = utc_tm->tm_min;
+    response->SystemDateAndTime->UTCDateTime->Time->Second = utc_tm->tm_sec;
+    response->SystemDateAndTime->UTCDateTime->Date = soap_new_tt__Date(soap, 1);
+    response->SystemDateAndTime->UTCDateTime->Date->Day = utc_tm->tm_mday;
+    response->SystemDateAndTime->UTCDateTime->Date->Month = utc_tm->tm_mon +1;
+    response->SystemDateAndTime->UTCDateTime->Date->Year = utc_tm->tm_year + 1900;
 
     struct tm* local_tm = localtime_r(&utc_now, &buf);
     if(local_tm->tm_isdst){
-        tds__GetSystemDateAndTimeResponse->SystemDateAndTime->DaylightSavings = xsd__boolean__true_;
+        response->SystemDateAndTime->DaylightSavings = xsd__boolean__true_;
     } else {
-        tds__GetSystemDateAndTimeResponse->SystemDateAndTime->DaylightSavings = xsd__boolean__false_;
+        response->SystemDateAndTime->DaylightSavings = xsd__boolean__false_;
     }
 
     // /etc/timezone - Timezone string
@@ -147,27 +144,44 @@ __tds__GetSystemDateAndTime(struct soap* soap, struct _tds__GetSystemDateAndTime
     // /usr/share/zoneinfo/... all timezones
     // /usr/share/zoneinfo/tzdata.zi - database
     // RFC https://datatracker.ietf.org/doc/html/rfc8536
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->TimeZone = soap_new_tt__TimeZone(soap, 1);
+    response->SystemDateAndTime->TimeZone = soap_new_tt__TimeZone(soap, 1);
     # ifdef	__USE_MISC
-        tds__GetSystemDateAndTimeResponse->SystemDateAndTime->TimeZone->TZ = (char*) local_tm->tm_zone;
+        response->SystemDateAndTime->TimeZone->TZ = (char*) local_tm->tm_zone;
     # else
-        tds__GetSystemDateAndTimeResponse->SystemDateAndTime->TimeZone->TZ = (char*) local_tm->__tm_zone;
+        response->SystemDateAndTime->TimeZone->TZ = (char*) local_tm->__tm_zone;
     # endif
     
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime = soap_new_tt__DateTime(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Time = soap_new_tt__Time(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Time->Hour = local_tm->tm_hour;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Time->Minute = local_tm->tm_min;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Time->Second = local_tm->tm_sec;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Date = soap_new_tt__Date(soap, 1);
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Date->Day = local_tm->tm_mday;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Date->Month = local_tm->tm_mon+1;
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->LocalDateTime->Date->Year = local_tm->tm_year + 1900;
+    response->SystemDateAndTime->LocalDateTime = soap_new_tt__DateTime(soap, 1);
+    response->SystemDateAndTime->LocalDateTime->Time = soap_new_tt__Time(soap, 1);
+    response->SystemDateAndTime->LocalDateTime->Time->Hour = local_tm->tm_hour;
+    response->SystemDateAndTime->LocalDateTime->Time->Minute = local_tm->tm_min;
+    response->SystemDateAndTime->LocalDateTime->Time->Second = local_tm->tm_sec;
+    response->SystemDateAndTime->LocalDateTime->Date = soap_new_tt__Date(soap, 1);
+    response->SystemDateAndTime->LocalDateTime->Date->Day = local_tm->tm_mday;
+    response->SystemDateAndTime->LocalDateTime->Date->Month = local_tm->tm_mon+1;
+    response->SystemDateAndTime->LocalDateTime->Date->Year = local_tm->tm_year + 1900;
 
     //No use
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime->Extension = NULL;
-    return SOAP_OK;
-}
+    response->SystemDateAndTime->Extension = NULL;
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
+
+ONVIF_DEFINE_UNSECURE_METHOD(tds__GetHostname)
+	char local_hostname[NI_MAXHOST];
+	char dhcp_hostname[NI_MAXHOST];
+    local_hostname[NI_MAXHOST-1] = '\0';
+	response->HostnameInformation = soap_new_tt__HostnameInformation(soap, 1);
+	response->HostnameInformation->Extension = NULL;
+	response->HostnameInformation->__anyAttribute = NULL;
+
+    if(!gethostname(local_hostname, NI_MAXHOST-1) && !NetworkUtils__lookup_hostname(local_hostname,dhcp_hostname)){
+		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
+		response->HostnameInformation->Name = dhcp_hostname;
+		return SOAP_OK;
+	} else {
+		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
+		response->HostnameInformation->Name = local_hostname;
+	}
+ONVIF_METHOD_RETURNVAL(SOAP_FATAL_ERROR)
 
 int  
 OnvifDeviceService__serve(struct soap *soap){
@@ -412,7 +426,6 @@ ONVIF_DEFINE_NO_METHOD(tds__GetAuthFailureWarningConfiguration)
 ONVIF_DEFINE_NO_METHOD(tds__SetAuthFailureWarningConfiguration)
 ONVIF_DEFINE_NO_METHOD(tds__GetCapabilities)
 ONVIF_DEFINE_NO_METHOD(tds__SetDPAddresses)
-ONVIF_DEFINE_NO_METHOD(tds__GetHostname)
 ONVIF_DEFINE_NO_METHOD(tds__SetHostname)
 ONVIF_DEFINE_NO_METHOD(tds__SetHostnameFromDHCP)
 ONVIF_DEFINE_NO_METHOD(tds__GetDNS)

@@ -24,7 +24,7 @@ ONVIF_DEFINE_SECURE_METHOD(trt__GetProfiles)
     response->Profiles->MetadataConfiguration = NULL;
     response->Profiles->Extension = NULL;
     response->Profiles->__anyAttribute = NULL;
-ONVIF_DEFINE_SECURE_METHOD_RETURNVAL(SOAP_OK)
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 ONVIF_DEFINE_SECURE_METHOD(trt__GetStreamUri)
     response->MediaUri = soap_new_tt__MediaUri(soap, 1);
@@ -35,7 +35,7 @@ ONVIF_DEFINE_SECURE_METHOD(trt__GetStreamUri)
     response->MediaUri->__size = 0;
     response->MediaUri->__any = NULL;
     response->MediaUri->__anyAttribute = NULL;
-ONVIF_DEFINE_SECURE_METHOD_RETURNVAL(SOAP_OK)
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 int  
 OnvifMediaService__serve(struct soap *soap){

@@ -13,6 +13,9 @@
     SOAP_FMAC5 int SOAP_FMAC6  \
     BUILD_NO_METH_FUNC(onvif_method)(struct soap* soap, struct BUILD_NO_METH_REQUEST(onvif_method) * request, struct BUILD_NO_METH_RESPONSE(onvif_method) * response)
 
+#define ONVIF_DEFINE_UNSECURE_METHOD(onvif_method) \
+    ONVIF_DEFINE_METHOD(onvif_method) {
+
 #define ONVIF_DEFINE_NO_METHOD(onvif_method) \
     ONVIF_DEFINE_METHOD(onvif_method){ \
         C_WARN(#onvif_method" onvif_method not implemented"); \
@@ -37,7 +40,7 @@
         return SOAP_FAULT; \
     }
 
-#define ONVIF_DEFINE_SECURE_METHOD_RETURNVAL(val) \
+#define ONVIF_METHOD_RETURNVAL(val) \
         /* TODO Optionally sign message */ \
         return val; \
     }
