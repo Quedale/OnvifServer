@@ -62,6 +62,9 @@ IniUtils__get_config_path(char * file_path, char * ret_val){
 void 
 IniUtils__extract_data(struct soap * soap, char * path, key_pair_callback callback, void * user_data){
     FILE * fptr = fopen(path, "r");
+    if(!fptr)
+        return;
+
     int buffer_size = INI_BUFFER_LENGTH;
     char buffer[buffer_size];
     char ch;
@@ -136,6 +139,8 @@ IniUtils__extract_data(struct soap * soap, char * path, key_pair_callback callba
         free(current_category);
         current_category = NULL;
     }
+
+    fclose(fptr); 
 }
 
 void 
