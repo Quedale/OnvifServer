@@ -221,7 +221,13 @@ void wsdd_event_ResolveMatches(struct soap *soap, unsigned int InstanceId, const
 
 soap_wsdd_mode 
 wsdd_event_Resolve(struct soap *soap, const char *MessageID, const char *ReplyTo, const char *EndpointReference, struct wsdd__ResolveMatchType *match){
-    C_WARN("wsdd_event_Resolve");
+    unsigned char bytes[4];
+    bytes[0] = soap->ip & 0xFF;
+    bytes[1] = (soap->ip >> 8) & 0xFF;
+    bytes[2] = (soap->ip >> 16) & 0xFF;
+    bytes[3] = (soap->ip >> 24) & 0xFF;  
+
+    C_DEBUG("Discovery Resolve from %d.%d.%d.%d", (int)bytes[3], (int)bytes[2], (int)bytes[1], (int)bytes[0]);
     return SOAP_WSDD_ADHOC;
 }
 

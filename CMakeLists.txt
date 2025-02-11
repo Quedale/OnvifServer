@@ -6,6 +6,7 @@ set(ONVIF_MAX_USERS CACHE STRING "Maximum number of users allowed")
 set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/dist)
 set(LIBRARY_OUTPUT_PATH    ${OUTPUT_DIR})
 set(EXECUTABLE_OUTPUT_PATH ${OUTPUT_DIR})
+set(INI_BUFFER_LENGTH 64 CACHE STRING "Max buffer length for each line in ini files")
 
 execute_process (
     COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/autogen.sh"
@@ -45,6 +46,10 @@ add_executable(onvifserver
 
 if (ONVIF_MAX_USERS)
   target_compile_options(onvifserver PRIVATE "SHELL: -DONVIF_MAX_USERS=${ONVIF_MAX_USERS}")
+endif()
+
+if (INI_BUFFER_LENGTH)
+  target_compile_options(onvifserver PRIVATE "SHELL: -DINI_BUFFER_LENGTH=${INI_BUFFER_LENGTH}")
 endif()
 
 set(GSTREAMER_DEP_LIST               

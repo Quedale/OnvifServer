@@ -1,6 +1,7 @@
 #include "device_service.h"
 #include "clogger.h"
 #include "../common/service_common.h"
+#include "../common/ini_utils.h"
 #include "../media/media_service.h"
 #include "network_utils.h"
 
@@ -182,6 +183,48 @@ ONVIF_DEFINE_UNSECURE_METHOD(tds__GetHostname)
 		response->HostnameInformation->Name = local_hostname;
 	}
 ONVIF_METHOD_RETURNVAL(SOAP_FATAL_ERROR)
+
+void tds__GetDeviceInformation_config_callback(struct soap * soap, char * category, char * key, int key_length, char * val, int val_length, void * user_data){
+	struct _tds__GetDeviceInformationResponse * response = (struct _tds__GetDeviceInformationResponse *)user_data;
+	if(!strncmp("DeviceInformation",category, strlen(category))){
+		char value[INI_BUFFER_LENGTH-2];
+		strncpy(value,val,val_length);
+		value[INI_BUFFER_LENGTH-2] = '\0';
+		if(key_length == strlen("FirmwareVersion") && !strncmp("FirmwareVersion",key,key_length)){
+			response->FirmwareVersion = soap_malloc(soap,key_length);
+			strncpy(response->FirmwareVersion,val,val_length);
+		} else if(key_length == strlen("HardwareId") && !strncmp("HardwareId",key,key_length)){
+			response->HardwareId = soap_malloc(soap,key_length);
+			strncpy(response->HardwareId,val,val_length);
+		} else if(key_length == strlen("Manufacturer") && !strncmp("Manufacturer",key,key_length)){
+			response->Manufacturer = soap_malloc(soap,key_length);
+			strncpy(response->Manufacturer,val,val_length);
+		} else if(key_length == strlen("Model") && !strncmp("Model",key,key_length)){
+			response->Model = soap_malloc(soap,key_length);
+			strncpy(response->Model,val,val_length);
+		} else if(key_length == strlen("SerialNumber") && !strncmp("SerialNumber",key,key_length)){
+			response->SerialNumber = soap_malloc(soap,key_length);
+			strncpy(response->SerialNumber,val,val_length);
+		}
+	}
+
+}
+
+ONVIF_DEFINE_UNSECURE_METHOD(tds__GetDeviceInformation)
+	response->FirmwareVersion = NULL;
+	response->HardwareId = NULL;
+	response->Manufacturer = NULL;
+	response->Model = NULL;
+	response->SerialNumber = NULL;
+
+	IniUtils__parse_file(soap, "config.ini", tds__GetDeviceInformation_config_callback, response);
+	
+	if(!response->FirmwareVersion) response->FirmwareVersion = "Default Version";
+	if(!response->HardwareId) response->HardwareId = "Default HardwareId";
+	if(!response->Manufacturer) response->Manufacturer = "Default Manufacturer";
+	if(!response->Model) response->Model = "Default Model";
+	if(!response->SerialNumber) response->SerialNumber = "Default SerialNumber";
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 int  
 OnvifDeviceService__serve(struct soap *soap){
@@ -390,7 +433,6 @@ OnvifDeviceService__serve(struct soap *soap){
 }
 
 ONVIF_DEFINE_NO_METHOD(tds__GetServiceCapabilities)
-ONVIF_DEFINE_NO_METHOD(tds__GetDeviceInformation)
 ONVIF_DEFINE_NO_METHOD(tds__SetSystemDateAndTime)
 ONVIF_DEFINE_NO_METHOD(tds__SetSystemFactoryDefault)
 ONVIF_DEFINE_NO_METHOD(tds__UpgradeSystemFirmware)
