@@ -176,11 +176,13 @@ ONVIF_DEFINE_UNSECURE_METHOD(tds__GetHostname)
 
     if(!gethostname(local_hostname, NI_MAXHOST-1) && !NetworkUtils__lookup_hostname(local_hostname,dhcp_hostname)){
 		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
-		response->HostnameInformation->Name = dhcp_hostname;
+		response->HostnameInformation->Name = soap_malloc(soap,strlen(dhcp_hostname)+1);
+		strcpy(response->HostnameInformation->Name,dhcp_hostname);
 		return SOAP_OK;
 	} else {
 		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
-		response->HostnameInformation->Name = local_hostname;
+		response->HostnameInformation->Name = soap_malloc(soap,strlen(local_hostname)+1);
+		strcpy(response->HostnameInformation->Name,local_hostname);
 	}
 ONVIF_METHOD_RETURNVAL(SOAP_FATAL_ERROR)
 

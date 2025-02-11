@@ -103,9 +103,9 @@ IniUtils__extract_data(struct soap * soap, char * path, key_pair_callback callba
         } else if (parsing_section_name > -1 && ch == ']'){
             //allocate or resize current category buffer if too small
             if(!current_category) {
-                current_category = malloc(index-1-parsing_section_name);
+                current_category = malloc(index-parsing_section_name);
             } else if ( (int)strlen(current_category) < index-1-parsing_section_name){
-                current_category = realloc(current_category,index-1-parsing_section_name);
+                current_category = realloc(current_category,index-parsing_section_name);
             }
             //Copy category name buffer so that it can be used in later keypair dispatch
             strncpy(current_category, &buffer[parsing_section_name+1], index-1-parsing_section_name);
