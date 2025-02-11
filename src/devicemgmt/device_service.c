@@ -5,6 +5,9 @@
 #include "../media/media_service.h"
 #include "network_utils.h"
 
+#define ONVIF_SCOPE_ITEM_PREFIX "onvif://www.onvif.org/"
+#define ONVIF_DEVICEINFO_DEFAULT_VAL "Default HardwareId"
+
 ONVIF_DEFINE_UNSECURE_METHOD(tds__GetServices)
     C_DEBUG("tds__GetServices");
 
@@ -193,23 +196,22 @@ void tds__GetDeviceInformation_config_callback(struct soap * soap, char * catego
 		strncpy(value,val,val_length);
 		value[INI_BUFFER_LENGTH-2] = '\0';
 		if(key_length == strlen("FirmwareVersion") && !strncmp("FirmwareVersion",key,key_length)){
-			response->FirmwareVersion = soap_malloc(soap,key_length);
+			response->FirmwareVersion = soap_malloc(soap,val_length);
 			strncpy(response->FirmwareVersion,val,val_length);
 		} else if(key_length == strlen("HardwareId") && !strncmp("HardwareId",key,key_length)){
-			response->HardwareId = soap_malloc(soap,key_length);
+			response->HardwareId = soap_malloc(soap,val_length);
 			strncpy(response->HardwareId,val,val_length);
 		} else if(key_length == strlen("Manufacturer") && !strncmp("Manufacturer",key,key_length)){
-			response->Manufacturer = soap_malloc(soap,key_length);
+			response->Manufacturer = soap_malloc(soap,val_length);
 			strncpy(response->Manufacturer,val,val_length);
 		} else if(key_length == strlen("Model") && !strncmp("Model",key,key_length)){
-			response->Model = soap_malloc(soap,key_length);
+			response->Model = soap_malloc(soap,val_length);
 			strncpy(response->Model,val,val_length);
 		} else if(key_length == strlen("SerialNumber") && !strncmp("SerialNumber",key,key_length)){
-			response->SerialNumber = soap_malloc(soap,key_length);
+			response->SerialNumber = soap_malloc(soap,val_length);
 			strncpy(response->SerialNumber,val,val_length);
 		}
 	}
-
 }
 
 ONVIF_DEFINE_UNSECURE_METHOD(tds__GetDeviceInformation)
@@ -222,10 +224,71 @@ ONVIF_DEFINE_UNSECURE_METHOD(tds__GetDeviceInformation)
 	IniUtils__parse_file(soap, "config.ini", tds__GetDeviceInformation_config_callback, response);
 	
 	if(!response->FirmwareVersion) response->FirmwareVersion = "Default Version";
-	if(!response->HardwareId) response->HardwareId = "Default HardwareId";
+	if(!response->HardwareId) response->HardwareId = ONVIF_DEVICEINFO_DEFAULT_VAL;
 	if(!response->Manufacturer) response->Manufacturer = "Default Manufacturer";
 	if(!response->Model) response->Model = "Default Model";
 	if(!response->SerialNumber) response->SerialNumber = "Default SerialNumber";
+ONVIF_METHOD_RETURNVAL(SOAP_OK)
+
+struct GetScopeData {
+	int length;
+	char ** scopes;
+};
+
+void tds__GetScopes_config_callback(struct soap * soap, char * category, char * key, int key_length, char * val, int val_length, void * user_data){
+	struct GetScopeData * data = (struct GetScopeData *)user_data;
+	if(!strncmp("DeviceInformation",category, strlen(category))){
+		if(key_length == strlen("HardwareId") && !strncmp("HardwareId",key,key_length)){
+			if(!data->scopes) {
+				data->scopes = malloc(sizeof(char*)*(data->length+1));
+			} else {
+				data->scopes = realloc(data->scopes,sizeof(char*)*(data->length+1));
+			}
+			data->scopes[data->length] = soap_malloc(soap,strlen(ONVIF_SCOPE_ITEM_PREFIX) + strlen("hardware") + val_length);
+			strcpy(data->scopes[data->length],ONVIF_SCOPE_ITEM_PREFIX);
+			strcat(data->scopes[data->length],"hardware/");
+			strncat(data->scopes[data->length],val,val_length);
+			data->length++;
+		}
+	} else if(!strncmp("Scopes",category, strlen(category))){
+		if(!data->scopes) {
+			data->scopes = malloc(sizeof(char*)*(data->length+1));
+		} else {
+			data->scopes = realloc(data->scopes,sizeof(char*)*(data->length+1));
+		}
+		data->scopes[data->length] = soap_malloc(soap,strlen(ONVIF_SCOPE_ITEM_PREFIX) + key_length + 1 + val_length);
+		strcpy(data->scopes[data->length],ONVIF_SCOPE_ITEM_PREFIX);
+		strncat(data->scopes[data->length],key,key_length);
+		strcat(data->scopes[data->length],"/");
+		strncat(data->scopes[data->length],val,val_length);
+		data->length++;
+	} else {
+		C_ERROR("Unknown %s",category);
+	}
+}
+
+ONVIF_DEFINE_UNSECURE_METHOD(tds__GetScopes)
+	struct GetScopeData data;
+	memset (&data, 0, sizeof (data));
+	response->__sizeScopes = 2;
+
+	IniUtils__parse_file(soap, "config.ini", tds__GetScopes_config_callback, &data);
+
+	response->__sizeScopes+=data.length;
+	response->Scopes = soap_new_tt__Scope(soap, response->__sizeScopes + data.length);
+
+	for(int i=data.length-1;i>=0;i--){
+		response->Scopes[i+2].ScopeDef = tt__ScopeDefinition__Configurable;
+		response->Scopes[i+2].ScopeItem = data.scopes[i];
+		response->Scopes[i+2].ScopeDef = tt__ScopeDefinition__Configurable;
+	}
+	if(data.scopes){
+		free(data.scopes);
+	}
+	response->Scopes[0].ScopeDef = tt__ScopeDefinition__Fixed;
+	response->Scopes[0].ScopeItem = ONVIF_SCOPE_ITEM_PREFIX"Profile/S";
+	response->Scopes[1].ScopeDef = tt__ScopeDefinition__Fixed;
+	response->Scopes[1].ScopeItem = ONVIF_SCOPE_ITEM_PREFIX"type/video_encoder";
 ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 int  
@@ -443,7 +506,6 @@ ONVIF_DEFINE_NO_METHOD(tds__RestoreSystem)
 ONVIF_DEFINE_NO_METHOD(tds__GetSystemBackup)
 ONVIF_DEFINE_NO_METHOD(tds__GetSystemLog)
 ONVIF_DEFINE_NO_METHOD(tds__GetSystemSupportInformation)
-ONVIF_DEFINE_NO_METHOD(tds__GetScopes)
 ONVIF_DEFINE_NO_METHOD(tds__SetScopes)
 ONVIF_DEFINE_NO_METHOD(tds__AddScopes)
 ONVIF_DEFINE_NO_METHOD(tds__RemoveScopes)
