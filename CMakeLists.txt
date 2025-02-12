@@ -42,11 +42,13 @@ add_executable(onvifserver
                     ${GSOAP_SRC_DIR}/gsoap/stdsoap2.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/logging.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/smdevp.c 
+                    ${GSOAP_SRC_DIR}/gsoap/plugin/md5evp.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/mecevp.c 
                     ${GSOAP_SRC_DIR}/gsoap/plugin/wsaapi.c 
                     ${GSOAP_SRC_DIR}/gsoap/plugin/wsseapi.c 
                     ${GSOAP_SRC_DIR}/gsoap/plugin/threads.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/httpda.c
+                    ${GSOAP_SRC_DIR}/gsoap/plugin/httpmd5.c
                     ${GSOAP_SRC_DIR}/gsoap/plugin/wsddapi.c
                     ${GSOAP_SRC_DIR}/gsoap/custom/struct_timeval.c)
 

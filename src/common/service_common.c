@@ -2,6 +2,7 @@
 #include "onvifsoap.nsmap"
 #include "logging.h"
 #include "clogger.h"
+#include "httpmd5.h"
 
 SOAP_FMAC5 int SOAP_FMAC6 
 SOAP_ENV__Fault(struct soap* soap, char *faultcode, char *faultstring, char *faultactor, struct SOAP_ENV__Detail *detail, struct SOAP_ENV__Code *SOAP_ENV__Code, struct SOAP_ENV__Reason *SOAP_ENV__Reason, char *SOAP_ENV__Node, char *SOAP_ENV__Role, struct SOAP_ENV__Detail *SOAP_ENV__Detail){
@@ -19,6 +20,8 @@ struct soap *
 ServiceCommon__soap_new1(int type, struct Namespace * namespace){
     struct soap * soap = soap_new1(type);
     soap_set_namespaces(soap, namespace);
+    soap_register_plugin(soap, http_da);
+    soap_register_plugin(soap, http_md5);
     soap->bind_flags         = SO_REUSEADDR;
     char *debug_flag = NULL;
 

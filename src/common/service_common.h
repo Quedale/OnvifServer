@@ -1,6 +1,7 @@
 #ifndef ONVIF_SERVICE_COMMON_H_ 
 #define ONVIF_SERVICE_COMMON_H_
 
+#include "httpda.h"
 #include "stdsoap2.h"
 #include SOAP_XSTRINGIFY(SOAP_H_FILE)
 
@@ -8,6 +9,11 @@
 #define BUILD_NO_METH_FUNC(a)  __##a
 #define BUILD_NO_METH_REQUEST(a)  _##a 
 #define BUILD_NO_METH_RESPONSE(a) CONCAT(_##a, Response)
+
+#define FAULT_UNAUTHORIZED "\"http://www.onvif.org/ver10/error\":NotAuthorized"
+#define FAULT_ACTIONNOTSUPPORTED "\"http://www.onvif.org/ver10/error\":ActionNotSupported"
+#define ONVIF_NOT_SUPPORTED_FAULT soap_receiver_fault_subcode(soap, FAULT_ACTIONNOTSUPPORTED, NULL, NULL)
+#define ONVIF_NOT_AUTHORIZED_FAULT ((!soap_receiver_fault_subcode(soap, FAULT_UNAUTHORIZED, NULL, NULL)) ? 401 : 401) //I dont know any better way to return a value from a macro
 
 #define ONVIF_DEFINE_METHOD(onvif_method) \
     SOAP_FMAC5 int SOAP_FMAC6  \
@@ -18,31 +24,56 @@
 
 #define ONVIF_DEFINE_NO_METHOD(onvif_method) \
     ONVIF_DEFINE_METHOD(onvif_method){ \
-        C_WARN(#onvif_method" onvif_method not implemented"); \
-        return SOAP_NO_METHOD; \
+      C_WARN(#onvif_method" method not implemented"); \
+      return SOAP_NO_METHOD; \
     }
 
+#define ONVIF_DEFINE_NOT_SUPPORTED(onvif_method) \
+    ONVIF_DEFINE_METHOD(onvif_method){ \
+      C_DEBUG(#onvif_method" action not supported"); \
+      return ONVIF_NOT_SUPPORTED_FAULT; \
+    }
+
+#define ONVIF_REALM "OnvifServerRealm"
 #define ONVIF_DEFINE_SECURE_METHOD(onvif_method) \
     ONVIF_DEFINE_METHOD(onvif_method) { \
     C_DEBUG(#onvif_method); \
     const char *username = soap_wsse_get_Username(soap); \
-    const char *password; \
-    if (!username || !strlen(username)){ \
-        C_WARN(#onvif_method" Anonymous authentication attempt"); \
-        soap_wsse_delete_Security(soap); \
-        return SOAP_FAULT; \
+    const char *password = "admin"; /* TODO Fixed hardcoded value with credentials database */ \
+    if (!soap->authrealm){ /*Initiating HTTP handshake*/ \
+      C_TRACE(#onvif_method" No realm set"); \
+      soap->authrealm = ONVIF_REALM; \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
     } \
-    password = "admin"; /* TODO Fixed hardcoded value with credentials database */ \
+    if (!username || !strlen(username)){ \
+      C_WARN(#onvif_method" Anonymous authentication attempt"); \
+      soap_wsse_delete_Security(soap); \
+      soap->authrealm = ONVIF_REALM; \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
+    } \
+    if (strcmp(soap->authrealm, ONVIF_REALM)){ \
+      C_WARN(#onvif_method" Invalid HTTP realm supplied '%s'",username); \
+      soap->authrealm = ONVIF_REALM; \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
+    } \
+    if (strcmp(soap->userid, username)){ \
+      C_WARN(#onvif_method" Invalid HTTP userid supplied '%s'",username); \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
+    } \
+    if (http_da_verify_post(soap, password)){ \
+      C_WARN(#onvif_method" Invalid HTTP credentials supplied '%s'",username); \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
+    } \
     if (soap_wsse_verify_Password(soap, password)){ \
-        C_TRACE("Failed authentication attempt for user '%s'",username); \
-        soap_wsse_delete_Security(soap); \
-        /* TODO Optionally sign error */ \
-        return SOAP_FAULT; \
+      C_WARN(#onvif_method" Invalid soap credentials supplied '%s'",username); /* This should technically not happen since http was successful */ \
+      soap_wsse_delete_Security(soap); \
+      /* TODO Optionally sign error */ \
+      return ONVIF_NOT_AUTHORIZED_FAULT; \
     }
 
 #define ONVIF_METHOD_RETURNVAL(val) \
-        /* TODO Optionally sign message */ \
-        return val; \
+      /* TODO Optionally sign message */ \
+      return val; \
     }
 
 int ServiceCommon__delete_pointer(struct soap *soap, struct soap_clist *p);
