@@ -12,14 +12,16 @@ static char doc[] = "Onvif Linux Server.";
 int QUIT_FLAG = 0; //Used to force quit on double sigterm signal
 OnvifRtspService * rtsp_service = NULL;
 
-static struct argp_option options[2] = {
-    { "port",   'p',    "PORT", 0,      "Network port to listen. (Default: 8080)", 1},
-    { 0 } 
+static struct argp_option options[] = {
+    { "port",       'p',    "PORT",     0,  "Network port to listen. (Default: 8080)", 1},
+    { "rtspport",   'r',    "RTSPPORT", 0,  "RTSP port used. (Default: 8554)",         1},
+    { 0 }
 };
 
 //Define argument struct
 struct arguments {
     int port;
+    int rtsp_port;
 };
 
 //main arguments processing function
@@ -28,6 +30,7 @@ parse_opt(int key, char *arg, struct argp_state *state) {
     struct arguments *arguments = state->input;
     switch (key) {
     case 'p': arguments->port = atoi(arg); break;
+    case 'r': arguments->rtsp_port = atoi(arg); break;
     case ARGP_KEY_ARG: return 0;
     default: return ARGP_ERR_UNKNOWN;
     }   
@@ -80,17 +83,26 @@ main(int argc, char *argv[]) {
 
     /* Default values. */
     arguments.port = 8080;
+    arguments.rtsp_port = 8554;
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
     if(arguments.port < 1 || arguments.port > 65535){
         C_FATAL("Invalid port number provider. Must be >0 & <=65535.\n\tCurrent value : '%d'",arguments.port);
         return 1;
     }
+    if(arguments.rtsp_port < 1 || arguments.rtsp_port > 65535){
+        C_FATAL("Invalid RTSP port number provider. Must be >0 & <=65535.\n\tCurrent value : '%d'",arguments.rtsp_port);
+        return 1;
+    }
+    if(arguments.port == arguments.rtsp_port){
+        C_FATAL("HTTP port and RTSP port can't be identical. '%d' == '%d'",arguments.port,arguments.rtsp_port);
+        return 1;
+    }
 
-    rtsp_service = OnvifRtspService__new(); //This is a GObject since there will be multiple instances in the future (1 for each profile created)
+    rtsp_service = OnvifRtspService__new(arguments.rtsp_port); //This is a GObject since there will be multiple instances in the future (1 for each profile created)
     OnvirRtspService__start(rtsp_service);
     OnvifDiscoveryService__start();
-    OnvifService__start(arguments.port); //This call doesn't invoke a thread and hangs
+    OnvifService__start(arguments.port, arguments.rtsp_port); //This call doesn't invoke a thread and hangs
 
     return 0;
 }

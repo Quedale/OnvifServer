@@ -1,19 +1,25 @@
 cmake_minimum_required(VERSION 3.5.0)
 project(onvif-device VERSION 0.1.0)
 
-set(GSOAP_SRC_DIR ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8 CACHE STRING "Location of the gsoap source directory")
-set(ONVIF_MAX_USERS CACHE STRING "Maximum number of users allowed")
+set(GSOAP_SRC_DIR ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8 CACHE PATH "Location of the gsoap source directory")
+set(ENABLE_NVCODEC OFF CACHE BOOL "Enables the nvidia gstreamer plugin")
+set(INI_BUFFER_LENGTH 64 CACHE STRING "Max buffer length for each line in ini files")
+
 set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/dist)
 set(LIBRARY_OUTPUT_PATH    ${OUTPUT_DIR})
 set(EXECUTABLE_OUTPUT_PATH ${OUTPUT_DIR})
-set(INI_BUFFER_LENGTH 64 CACHE STRING "Max buffer length for each line in ini files")
 
-execute_process (
-    COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/autogen.sh"
-    RESULT_VARIABLE ret)
+if (NOT INI_BUFFER_LENGTH MATCHES "^[0-9]+$")
+  message( FATAL_ERROR "INI_BUFFER_LENGTH must be an integer.")
+endif()
 
+if (ENABLE_NVCODEC)
+  set(AUTOGEN_ARGS "--enable-nvcodec=true" STRING "Autogen arguments")
+endif()
+
+execute_process (COMMAND bash -c "${CMAKE_CURRENT_SOURCE_DIR}/autogen.sh ${AUTOGEN_ARGS}" RESULT_VARIABLE ret)
 if(ret EQUAL "1")
-    message( FATAL_ERROR "autogen.sh script failed.")
+  message( FATAL_ERROR "autogen.sh script failed.")
 endif()
 
 aux_source_directory(src src_dir)
@@ -44,50 +50,52 @@ add_executable(onvifserver
                     ${GSOAP_SRC_DIR}/gsoap/plugin/wsddapi.c
                     ${GSOAP_SRC_DIR}/gsoap/custom/struct_timeval.c)
 
-if (ONVIF_MAX_USERS)
-  target_compile_options(onvifserver PRIVATE "SHELL: -DONVIF_MAX_USERS=${ONVIF_MAX_USERS}")
+
+set(GSTREAMER_DEP_LIST               
+    gstreamer-1.0>=1.18                 #core
+    gstreamer-rtsp-server-1.0>=1.18
+    gstcoreelements>=1.18
+    gstapp>=1.18                              #base
+    gstaudioconvert>=1.18
+    gstaudioresample>=1.18
+    gstaudiotestsrc>=1.18
+    gstpbtypes>=1.18
+    gstrawparse>=1.18
+    gsttcp>=1.18
+    gsttypefindfunctions>=1.18
+    gstvideoconvertscale>=1.18
+    gstvideotestsrc>=1.18
+    gstvideorate>=1.18
+    gstvolume>=1.18
+    gstalaw>=1.18                            #good
+    gstaudioparsers>=1.18
+    gstautodetect>=1.18
+    gstmulaw>=1.18
+    gstalsa>=1.18     #gstpulseaudio
+    gstrtp>=1.18
+    gstrtpmanager>=1.18
+    gstrtsp>=1.18
+    gstinterleave>=1.18
+    gstjpeg>=1.18
+    gstudp>=1.18
+    gstvideo4linux2>=1.18
+    gstfdkaac>=1.18                           #bad
+    gstinterlace>=1.18
+    gstjpegformat>=1.18
+    gstopenh264>=1.18
+    gstrtponvif>=1.18
+    gstv4l2codecs>=1.18
+    gstvideoparsersbad>=1.18
+    gstde265>=1.18)
+
+if (ENABLE_NVCODEC)
+  set(GSTREAMER_DEP_LIST  ${GSTREAMER_DEP_LIST} gstnvcodec>=1.18)
+  target_compile_options(onvifserver PRIVATE "SHELL: -DENABLENVCODEC")
 endif()
 
 if (INI_BUFFER_LENGTH)
   target_compile_options(onvifserver PRIVATE "SHELL: -DINI_BUFFER_LENGTH=${INI_BUFFER_LENGTH}")
 endif()
-
-set(GSTREAMER_DEP_LIST               
-        gstreamer-1.0>=1.18                 #core
-        gstreamer-rtsp-server-1.0>=1.18
-        gstcoreelements>=1.18
-        gstapp>=1.18                              #base
-        gstaudioconvert>=1.18
-        gstaudioresample>=1.18
-        gstaudiotestsrc>=1.18
-        gstpbtypes>=1.18
-        gstrawparse>=1.18
-        gsttcp>=1.18
-        gsttypefindfunctions>=1.18
-        gstvideoconvertscale>=1.18
-        gstvideotestsrc>=1.18
-        gstvideorate>=1.18
-        gstvolume>=1.18
-        gstalaw>=1.18                            #good
-        gstaudioparsers>=1.18
-        gstautodetect>=1.18
-        gstmulaw>=1.18
-        gstalsa>=1.18     #gstpulseaudio
-        gstrtp>=1.18
-        gstrtpmanager>=1.18
-        gstrtsp>=1.18
-        gstinterleave>=1.18
-        gstjpeg>=1.18
-        gstudp>=1.18
-        gstvideo4linux2>=1.18
-        gstfdkaac>=1.18                           #bad
-        gstinterlace>=1.18                        #bad
-        gstjpegformat>=1.18
-        gstopenh264>=1.18
-        gstrtponvif>=1.18
-        gstv4l2codecs>=1.18
-        gstvideoparsersbad>=1.18
-        gstde265>=1.18)
 
 find_package(PkgConfig)
 message(STATUS "Checking system libraries for Gstreamer.")

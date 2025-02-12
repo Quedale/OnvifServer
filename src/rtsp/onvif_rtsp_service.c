@@ -2,6 +2,7 @@
 #include "onvif_rtsp_media_factory.h"
 #include "clogger.h"
 #include "portable_thread.h"
+#include "../common/service_common.h"
 
 /*
     Very ugly and rudimentary rtsp service implementation
@@ -10,10 +11,12 @@
 */
 typedef struct {
     int started;
+    int port;
     char * mount;
     GMainLoop * loop;
     P_THREAD_TYPE tid;
     GstRTSPServer * server;
+    guint server_id;
     OnvifRtspMediaFactory * factory;
 } OnvifRtspServicePrivate;
 
@@ -83,23 +86,42 @@ OnvifRtspService__init (OnvifRtspService *self){
 
     /*
     * Configure pipeline.
+    * Using launch string is temporary.
+    * Custom element construction will be implemented
     */
     gst_rtsp_media_factory_set_shared (GST_RTSP_MEDIA_FACTORY(priv->factory), FALSE);
     gst_rtsp_media_factory_set_media_gtype (GST_RTSP_MEDIA_FACTORY(priv->factory), GST_TYPE_RTSP_ONVIF_MEDIA);
     gst_rtsp_media_factory_set_launch (GST_RTSP_MEDIA_FACTORY(priv->factory), "( "
-        "videotestsrc ! video/x-raw,width=640,height=480,framerate=30/1 ! "
-        "openh264enc ! h264parse ! rtph264pay name=pay0 pt=96 "
+        "videotestsrc ! video/x-raw,width=640,height=480,framerate=15/1 ! videoconvert ! "
+#ifdef ENABLENVCODEC
+        "nvh264enc"
+#else
+        "openh264enc"
+#endif
+        " ! h264parse ! rtph264pay name=pay0 pt=96 "
         "audiotestsrc ! audio/x-raw,rate=8000 ! "
         "alawenc ! rtppcmapay name=pay1 pt=97 " 
         ")");
 }
 
 OnvifRtspService * 
-OnvifRtspService__new (){
-    return g_object_new (ONVIF_TYPE_RTSP_SERVICE, NULL);
+OnvifRtspService__new (int port){
+    OnvifRtspService * self = g_object_new (ONVIF_TYPE_RTSP_SERVICE, NULL);
+    OnvifRtspServicePrivate * priv = OnvifRtspService__get_instance_private (self);
+    priv->port = port;
+    return self;
 }
 
-void * OnvirRtspService__thread(void * event){
+GstRTSPFilterResult 
+OnvifRtspService__remove_client_filter(GstRTSPServer* server, GstRTSPClient* client, gpointer user){
+    GstRTSPConnection *  conn = gst_rtsp_client_get_connection(client);
+    const gchar * ip = gst_rtsp_connection_get_ip(conn);
+    C_TRACE("Closing client %s",ip);
+    return GST_RTSP_FILTER_REMOVE;
+}
+
+void * 
+OnvirRtspService__thread(void * event){
     c_log_set_thread_color(ANSI_COLOR_GREEN, P_THREAD_ID);
     OnvifRtspServiceInitData * data = (OnvifRtspServiceInitData *) event;
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (data->service);
@@ -116,12 +138,22 @@ void * OnvirRtspService__thread(void * event){
     free(address);
     g_main_loop_run (priv->loop);
 
+    //Remove mount point
+    GstRTSPMountPoints * smounts = gst_rtsp_server_get_mount_points(priv->server);
+    if (NULL != smounts)
+        gst_rtsp_mount_points_remove_factory(smounts, priv->mount);
+    g_object_unref(smounts);
+
+    //Disconnect clients
+    gst_rtsp_server_client_filter(priv->server, OnvifRtspService__remove_client_filter, NULL);
+
     P_THREAD_EXIT;
     return NULL;
 
 }
 
-void OnvirRtspService__start(OnvifRtspService *self){
+void 
+OnvirRtspService__start(OnvifRtspService *self){
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (self);
     priv->started = TRUE;
     /*
@@ -133,7 +165,8 @@ void OnvirRtspService__start(OnvifRtspService *self){
     strcpy(&priv->mount[1],mount);
 
     char * bind_addr = "0.0.0.0";
-    char * bind_port = "8554";
+    char bind_port[5];
+    itoa(bind_port, priv->port, 10);
     GstRTSPMountPoints * mounts = gst_rtsp_server_get_mount_points (priv->server);
     gst_rtsp_mount_points_add_factory (mounts, priv->mount, GST_RTSP_MEDIA_FACTORY(priv->factory));
     g_object_unref (mounts);
@@ -143,8 +176,7 @@ void OnvirRtspService__start(OnvifRtspService *self){
     /*
     *   Start loop
     */
-    gst_rtsp_server_attach (priv->server, NULL);
-    // priv->loop = g_main_loop_new (NULL, FALSE);
+    priv->server_id = gst_rtsp_server_attach (priv->server, NULL);
 
     OnvifRtspServiceInitData data;
     data.done = 0;
@@ -160,9 +192,11 @@ void OnvirRtspService__start(OnvifRtspService *self){
     P_MUTEX_CLEANUP(data.lock);
 }
 
-void OnvirRtspService__stop(OnvifRtspService *self){
+void 
+OnvirRtspService__stop(OnvifRtspService *self){
     OnvifRtspServicePrivate *priv = OnvifRtspService__get_instance_private (self);
     if(priv->loop){
+        g_source_remove (priv->server_id);
         g_main_loop_quit(priv->loop);
         g_main_loop_unref(priv->loop);
         priv->loop = NULL;

@@ -12,7 +12,7 @@ G_DECLARE_FINAL_TYPE (OnvifRtspService, OnvifRtspService_, ONVIF, RTSP_SERVICE, 
 struct _OnvifRtspService { GObject parent_instance; };
 struct _OnvifRtspServiceClass { GObjectClass parent_class; };
 
-OnvifRtspService * OnvifRtspService__new();
+OnvifRtspService * OnvifRtspService__new(int port);
 void OnvirRtspService__start(OnvifRtspService *self);
 void OnvirRtspService__stop(OnvifRtspService *self);
 

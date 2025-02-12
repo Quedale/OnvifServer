@@ -92,7 +92,7 @@ OnvifService__thread(void *copy){
 }
 
 
-void OnvifService__start(int port){
+void OnvifService__start(int port, int rtsp_port){
     if(ONVIF_STARTED){
         C_ERROR("HTTP Service already running");
         return;
@@ -108,6 +108,10 @@ void OnvifService__start(int port){
 
     onvif_soap->send_timeout = onvif_soap->recv_timeout = 5;
     onvif_soap->transfer_timeout = 10;
+
+    OnvifUserConfig data;
+    data.rtsp_port = rtsp_port;
+    onvif_soap->user = &data;
 
     P_MUTEX_SETUP(queue_lock);
     P_COND_SETUP(queue_notempty);

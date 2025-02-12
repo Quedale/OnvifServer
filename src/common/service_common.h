@@ -87,6 +87,10 @@ int ServiceCommon__delete_pointer(struct soap *soap, struct soap_clist *p);
     C_ERROR("%s%d fault %s [%s]\n\"%s\"\nDetail: %s\n", soap->version ? "SOAP 1." : "Error ", soap->version ? (int)soap->version : soap->error, *c, v ? v : "no subcode", s ? s : "[no reason]", d ? d : "[no detail]"); \
   }
 
+typedef struct {
+    int rtsp_port;
+} OnvifUserConfig;
+
 struct soap * ServiceCommon__soap_new();
 struct soap * ServiceCommon__soap_new1(int type, struct Namespace * namespace);
 char * ServiceCommon__generate_xaddr(struct soap * soap, char * path);

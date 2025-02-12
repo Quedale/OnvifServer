@@ -27,8 +27,27 @@ ONVIF_DEFINE_SECURE_METHOD(trt__GetProfiles)
 ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 ONVIF_DEFINE_SECURE_METHOD(trt__GetStreamUri)
+	//Retrieve IP used by the socket. The client should be able to connect using it
+	char server_ip[16];
+	struct sockaddr_in my_addr;
+	memset (&my_addr, 0, sizeof (my_addr));
+	socklen_t len = sizeof(my_addr);
+	if(getsockname(soap->socket,(struct sockaddr *) &my_addr, &len) || !inet_ntop(AF_INET, &my_addr.sin_addr, server_ip, sizeof(server_ip))){
+		return SOAP_SVR_FAULT;
+	} //TODO Get domain from TLS handshake so that the rtsps stream can be properly initiated
+
+	OnvifUserConfig * data = (OnvifUserConfig *) soap->user;
+    char bind_port[5];
+    itoa(bind_port, data->rtsp_port, 10);
+
     response->MediaUri = soap_new_tt__MediaUri(soap, 1);
-    response->MediaUri->Uri = "rtsp://localhost:8554/h264";
+	response->MediaUri->Uri = soap_malloc(soap,sizeof(char) * (strlen("rtsp://") + strlen(server_ip) + 1 + strlen(bind_port) + strlen("/h264")));
+	strcpy(response->MediaUri->Uri,"rtsp://");
+	strcat(response->MediaUri->Uri,server_ip);
+	strcat(response->MediaUri->Uri,":");
+	strcat(response->MediaUri->Uri,bind_port);
+	strcat(response->MediaUri->Uri,"/h264");
+
     response->MediaUri->InvalidAfterConnect = xsd__boolean__false_;
     response->MediaUri->InvalidAfterReboot = xsd__boolean__false_;
     response->MediaUri->Timeout = "PT0S";
