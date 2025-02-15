@@ -15,6 +15,29 @@
 #define ONVIF_NOT_SUPPORTED_FAULT soap_receiver_fault_subcode(soap, FAULT_ACTIONNOTSUPPORTED, NULL, NULL)
 #define ONVIF_NOT_AUTHORIZED_FAULT ((!soap_receiver_fault_subcode(soap, FAULT_UNAUTHORIZED, NULL, NULL)) ? 401 : 401) //I dont know any better way to return a value from a macro
 
+/*
+*
+* Simple macro to reallocate the size of a complex gsoap type
+* This macro takes care of setting default value by calculating count by factoring pointer size and struct size
+*
+* Here's an example :
+*     soap_instance_resize(soap,
+*       NetworkInterface->IPv4->Config->Manual,
+*       NetworkInterface->IPv4->Config->__sizeManual,
+*       tt__PrefixedIPv4Address);
+*/
+#define soap_instance_resize(soap,ptr,newsize, type) \
+        size_t og_count = *(size_t*)(((void**)&ptr[newsize-1]) - sizeof(void*)) / sizeof(struct type); \
+        void * nptr = soap_realloc(soap, ptr,sizeof(struct type) * newsize); \
+        if(nptr){ \
+          ptr = nptr; \
+          size_t new_count = sizeof(struct type) * newsize / sizeof(struct type); \
+          for(size_t i=new_count;i>og_count;i--) \
+              soap_default_##type(soap, (struct type *) &ptr[i-1]); \
+        } else { \
+          C_ERROR("Failed to realloc instance. Out-of-Memory?"); \
+        }
+            
 #define ONVIF_DEFINE_METHOD(onvif_method) \
     SOAP_FMAC5 int SOAP_FMAC6  \
     BUILD_NO_METH_FUNC(onvif_method)(struct soap* soap, struct BUILD_NO_METH_REQUEST(onvif_method) * request, struct BUILD_NO_METH_RESPONSE(onvif_method) * response)
@@ -126,5 +149,6 @@ struct soap * ServiceCommon__soap_new();
 struct soap * ServiceCommon__soap_new1(int type, struct Namespace * namespace);
 char * ServiceCommon__generate_xaddr(struct soap * soap, char * path);
 char* itoa(char* result, int value, int base);
+SOAP_FMAC1 void* SOAP_FMAC2 soap_realloc(struct soap *soap, void * ptr, size_t n);
 
 #endif

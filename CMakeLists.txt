@@ -4,6 +4,7 @@ project(onvif-device VERSION 0.1.0)
 set(GSOAP_SRC_DIR ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8 CACHE PATH "Location of the gsoap source directory")
 set(ENABLE_NVCODEC OFF CACHE BOOL "Enables the nvidia gstreamer plugin")
 set(INI_BUFFER_LENGTH 64 CACHE STRING "Max buffer length for each line in ini files")
+set(NET_DEBUG CACHE STRING "Max buffer length for each line in ini files")
 
 set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/dist)
 set(LIBRARY_OUTPUT_PATH    ${OUTPUT_DIR})
@@ -93,6 +94,10 @@ set(GSTREAMER_DEP_LIST
 if (ENABLE_NVCODEC)
   set(GSTREAMER_DEP_LIST  ${GSTREAMER_DEP_LIST} gstnvcodec>=1.18)
   target_compile_options(onvifserver PRIVATE "SHELL: -DENABLENVCODEC")
+endif()
+
+if (NET_DEBUG)
+  target_compile_options(onvifserver PRIVATE "SHELL: -DNET_DEBUG")
 endif()
 
 if (INI_BUFFER_LENGTH)

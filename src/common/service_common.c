@@ -4,6 +4,104 @@
 #include "clogger.h"
 #include "httpmd5.h"
 
+#ifndef SOAP_CANARY
+# define SOAP_CANARY (0xC0DE)
+#endif
+
+/*
+*
+* Reallocation implementation for gsoap. It is important to invoke soap_default_NS_Type(soap,instance) 
+* after reallocation to avoid clean up problems associated to mandatory fields.
+*
+* The macro "soap_instance_resize" in service_common.h is available for cleaner code
+*
+* Here's a simple example for NetworkInterfaces incrementing allocation count by 1
+* 	response->__sizeNetworkInterfaces++;
+*	struct tt__NetworkInterface * NetworkInterface;
+*	if(!response->NetworkInterfaces){
+*		response->NetworkInterfaces = soap_new_tt__NetworkInterface(soap, 1);
+*		NetworkInterface = response->NetworkInterfaces;
+*	} else {
+*		response->NetworkInterfaces = soap_realloc(soap, response->NetworkInterfaces,sizeof(struct tt__NetworkInterface) * response->__sizeNetworkInterfaces);
+*		NetworkInterface = &response->NetworkInterfaces[response->__sizeNetworkInterfaces-1];
+*       soap_default_tt__NetworkInterface(soap, NetworkInterface);  <----- This is the important part otherwise you will have to populate the entire object manually
+*   }
+*
+*/
+SOAP_FMAC1 void* SOAP_FMAC2
+soap_realloc(struct soap *soap, void * ptr, size_t n){
+    char *p;
+    size_t k = n;
+    if (SOAP_MAXALLOCSIZE > 0 && n > SOAP_MAXALLOCSIZE){
+        if (soap)
+            soap->error = SOAP_EOM;
+        return NULL;
+    }
+    if (!soap)
+        return realloc(ptr, n);
+
+    //Add mandatory extra padding
+    n += sizeof(short);
+    n += (~n+1) & (sizeof(void*)-1); /* align at 4-, 8- or 16-byte boundary by rounding up */
+    if (n + sizeof(void*) + sizeof(size_t) < k){
+        soap->error = SOAP_EOM;
+        return NULL;
+    }
+
+    //Search pointer if memory alloaction list
+    char **q;
+    for (q = (char**)(void*)&soap->alist; *q; q = *(char***)q){
+        if (*(unsigned short*)(char*)(*q - sizeof(unsigned short)) != (unsigned short)SOAP_CANARY){
+            C_ERROR("Data corruption in dynamic allocation");
+            soap->error = SOAP_MOE;
+            return NULL;
+        }
+        if (ptr == (void*)(*q - *(size_t*)(*q + sizeof(void*)))){
+            break;
+        }
+    }
+
+    if (ptr){
+        //Extract original allocation size
+        size_t og_size = *(size_t*)(*q + sizeof(void *));
+
+        //Reattach broken pointer chain
+        if(*(char***)q)
+            *q = **(char***)q;
+
+        //Shift original size to exclude original size and canary value
+        og_size -= sizeof(void*) - sizeof(size_t);
+        //Rellocation (define macro?)
+
+        p = (char*) realloc(ptr,n + sizeof(void*) + sizeof(size_t));
+        if(!p){
+            C_ERROR("Data corruption in dynamic allocation");
+            soap->error = SOAP_MOE;
+            return NULL;
+        }
+
+        /*
+        *   Initialize new memory allocation while leaving original data intact
+        *   This is the equivalent to soap_default_ns__Type(...)
+        */
+        memset(p + og_size, 0, n-og_size);
+
+       /* set a canary word to detect memory overruns and data corruption */
+       *(unsigned short*)((char*)p + n - sizeof(unsigned short)) = (unsigned short)SOAP_CANARY;
+
+       /* keep chain of alloced cells for destruction */
+       *(void**)(p + n) = soap->alist;
+       *(size_t*)(p + n + sizeof(void*)) = n;
+       soap->alist = p + n;
+
+       return (void*)p;
+   }
+   
+   C_ERROR("Pointer not found in memory allocation cache");
+   soap->error = SOAP_SVR_FAULT;
+   return NULL;
+}
+
 SOAP_FMAC5 int SOAP_FMAC6 
 SOAP_ENV__Fault(struct soap* soap, char *faultcode, char *faultstring, char *faultactor, struct SOAP_ENV__Detail *detail, struct SOAP_ENV__Code *SOAP_ENV__Code, struct SOAP_ENV__Reason *SOAP_ENV__Reason, char *SOAP_ENV__Node, char *SOAP_ENV__Role, struct SOAP_ENV__Detail *SOAP_ENV__Detail){
     C_DEBUG("SOAP_ENV__Fault - Not implemented");

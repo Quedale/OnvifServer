@@ -170,22 +170,29 @@ ONVIF_DEFINE_UNSECURE_METHOD(tds__GetSystemDateAndTime)
 ONVIF_METHOD_RETURNVAL(SOAP_OK)
 
 ONVIF_DEFINE_UNSECURE_METHOD(tds__GetHostname)
+    C_DEBUG("tds__GetHostname");
 	char local_hostname[NI_MAXHOST];
 	char dhcp_hostname[NI_MAXHOST];
     local_hostname[NI_MAXHOST-1] = '\0';
 	response->HostnameInformation = soap_new_tt__HostnameInformation(soap, 1);
 	response->HostnameInformation->Extension = NULL;
 	response->HostnameInformation->__anyAttribute = NULL;
-
-    if(!gethostname(local_hostname, NI_MAXHOST-1) && !NetworkUtils__lookup_hostname(local_hostname,dhcp_hostname)){
-		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
-		response->HostnameInformation->Name = soap_malloc(soap,strlen(dhcp_hostname)+1);
-		strcpy(response->HostnameInformation->Name,dhcp_hostname);
-		return SOAP_OK;
+	
+	//The logic below doesn't seem correct. Using netlink directly instead
+    if(!gethostname(local_hostname, NI_MAXHOST-1)){
+		if(!NetworkUtils__lookup_hostname(local_hostname,dhcp_hostname)){
+			response->HostnameInformation->FromDHCP = xsd__boolean__true_;
+			response->HostnameInformation->Name = soap_malloc(soap,strlen(dhcp_hostname)+1);
+			strcpy(response->HostnameInformation->Name,dhcp_hostname);
+			return SOAP_OK;
+		} else {
+			response->HostnameInformation->FromDHCP = xsd__boolean__false_;
+			response->HostnameInformation->Name = soap_malloc(soap,strlen(local_hostname)+1);
+			strcpy(response->HostnameInformation->Name,local_hostname);
+		}
 	} else {
-		response->HostnameInformation->FromDHCP = xsd__boolean__true_;
-		response->HostnameInformation->Name = soap_malloc(soap,strlen(local_hostname)+1);
-		strcpy(response->HostnameInformation->Name,local_hostname);
+		response->HostnameInformation->FromDHCP = xsd__boolean__false_;
+		response->HostnameInformation->Name = NULL;
 	}
 ONVIF_METHOD_RETURNVAL(SOAP_FATAL_ERROR)
 
@@ -540,7 +547,6 @@ ONVIF_DEFINE_NO_METHOD(tds__GetNTP)
 ONVIF_DEFINE_NO_METHOD(tds__SetNTP)
 ONVIF_DEFINE_NO_METHOD(tds__GetDynamicDNS)
 ONVIF_DEFINE_NO_METHOD(tds__SetDynamicDNS)
-ONVIF_DEFINE_NO_METHOD(tds__GetNetworkInterfaces)
 ONVIF_DEFINE_NO_METHOD(tds__SetNetworkInterfaces)
 ONVIF_DEFINE_NO_METHOD(tds__GetNetworkProtocols)
 ONVIF_DEFINE_NO_METHOD(tds__SetNetworkProtocols)
