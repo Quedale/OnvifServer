@@ -57,7 +57,7 @@ make -j$(nproc)
 At this point, you should be able to execute the server without installing it on the system
 
 ```
-./onvifserver -p 8080
+./dist/onvifserver -p 8080 -r 8554
 ```
 
 ### Install
