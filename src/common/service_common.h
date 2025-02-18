@@ -27,8 +27,9 @@
 *       tt__PrefixedIPv4Address);
 */
 #define soap_instance_resize(soap,ptr,newsize, type) \
-        size_t og_count = *(size_t*)(((void**)&ptr[newsize-1]) - sizeof(void*)) / sizeof(struct type); \
-        void * nptr = soap_realloc(soap, ptr,sizeof(struct type) * newsize); \
+        {size_t og_size; \
+        void * nptr = soap_realloc(soap, ptr,sizeof(struct type) * newsize,&og_size); \
+        size_t og_count = og_size / sizeof(struct type); \
         if(nptr){ \
           ptr = nptr; \
           size_t new_count = sizeof(struct type) * newsize / sizeof(struct type); \
@@ -36,7 +37,7 @@
               soap_default_##type(soap, (struct type *) &ptr[i-1]); \
         } else { \
           C_ERROR("Failed to realloc instance. Out-of-Memory?"); \
-        }
+        }}
             
 #define ONVIF_DEFINE_METHOD(onvif_method) \
     SOAP_FMAC5 int SOAP_FMAC6  \
@@ -149,6 +150,6 @@ struct soap * ServiceCommon__soap_new();
 struct soap * ServiceCommon__soap_new1(int type, struct Namespace * namespace);
 char * ServiceCommon__generate_xaddr(struct soap * soap, char * path);
 char* itoa(char* result, int value, int base);
-SOAP_FMAC1 void* SOAP_FMAC2 soap_realloc(struct soap *soap, void * ptr, size_t n);
-
+SOAP_FMAC1 void* SOAP_FMAC2 soap_realloc(struct soap *soap, void * ptr, size_t n, size_t * oldsize);
+SOAP_FMAC1 int SOAP_FMAC2 soap_sizeof(struct soap * soap, void * ptr);
 #endif

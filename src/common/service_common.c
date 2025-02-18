@@ -12,6 +12,7 @@
 *
 * Reallocation implementation for gsoap. It is important to invoke soap_default_NS_Type(soap,instance) 
 * after reallocation to avoid clean up problems associated to mandatory fields.
+* The orignalsize paramter is useful to determine the newly allocated space to initialize new soap data
 *
 * The macro "soap_instance_resize" in service_common.h is available for cleaner code
 *
@@ -27,9 +28,15 @@
 *       soap_default_tt__NetworkInterface(soap, NetworkInterface);  <----- This is the important part otherwise you will have to populate the entire object manually
 *   }
 *
+* Here's a simple example for NetworkInterfaces incrementing allocation count by n amount
+*       size_t original_size;
+*       int newsize = n;
+*		response->NetworkInterfaces = soap_realloc(soap, response->NetworkInterfaces,sizeof(struct tt__NetworkInterface) * newsize, &original_size);
+*       for(size_t i=newsize;i>original_size;i--) \
+*           soap_default_tt__NetworkInterface(soap, (struct tt__NetworkInterface *) &response->NetworkInterfaces[i-1]); \
 */
 SOAP_FMAC1 void* SOAP_FMAC2
-soap_realloc(struct soap *soap, void * ptr, size_t n){
+soap_realloc(struct soap *soap, void * ptr, size_t n, size_t * orignalsize){
     char *p;
     size_t k = n;
     if (SOAP_MAXALLOCSIZE > 0 && n > SOAP_MAXALLOCSIZE){
@@ -70,9 +77,12 @@ soap_realloc(struct soap *soap, void * ptr, size_t n){
             *q = **(char***)q;
 
         //Shift original size to exclude original size and canary value
-        og_size -= sizeof(void*) - sizeof(size_t);
-        //Rellocation (define macro?)
+        og_size -= sizeof(void*) - sizeof(size_t) - sizeof(unsigned short); //Handle round up?
+        if(orignalsize){
+            *orignalsize = og_size;
+        }
 
+        //Rellocation (define macro?)
         p = (char*) realloc(ptr,n + sizeof(void*) + sizeof(size_t));
         if(!p){
             C_ERROR("Data corruption in dynamic allocation");
