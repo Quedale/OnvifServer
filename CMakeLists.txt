@@ -4,7 +4,7 @@ project(onvif-device VERSION 0.1.0)
 set(GSOAP_SRC_DIR ${CMAKE_SOURCE_DIR}/subprojects/gsoap-2.8 CACHE PATH "Location of the gsoap source directory")
 set(ENABLE_NVCODEC OFF CACHE BOOL "Enables the nvidia gstreamer plugin")
 set(INI_BUFFER_LENGTH 64 CACHE STRING "Max buffer length for each line in ini files")
-set(NET_DEBUG CACHE STRING "Max buffer length for each line in ini files")
+set(NET_DEBUG CACHE BOOL "Max buffer length for each line in ini files")
 
 set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/dist)
 set(LIBRARY_OUTPUT_PATH    ${OUTPUT_DIR})
@@ -149,10 +149,6 @@ target_link_libraries(onvifserver PRIVATE m OpenSSL::SSL OpenSSL::Crypto ZLIB::Z
 # set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 #We have to link using LDFLAGS in order to keep the order or -lstdc++
 target_link_libraries(onvifserver PRIVATE ${GSTDEPS_LDFLAGS} ${DEPS_LDFLAGS} c stdc++)
-
-#Override SOAP_WSDD_2005 so that the wsdd plugins behaves appropriately for ONVIF remotediscovery.wsdl
-#This is to overcome a (in my opinion) bug where remotediscovery.wsdl uses an older version of ws-address compared to the reste of the wsdls.
-set_source_files_properties(${GSOAP_SRC_DIR}/gsoap/plugin/wsddapi.c PROPERTIES COMPILE_FLAGS -USOAP_WSDD_2005)
 
 #Ingore gsoap warnings
 if (MSVC)
