@@ -14,11 +14,14 @@ process_newaddr_attrs(struct soap * soap, struct _tds__GetNetworkInterfacesRespo
 
     int * ip_ptr = NULL;
     int attrlen = h->nlmsg_len - NLMSG_LENGTH( sizeof( *addr ) );
-    for (struct rtattr * attr = IFLA_RTA(addr); RTA_OK(attr, attrlen); attr = RTA_NEXT(attr, attrlen)) {
+    for (struct rtattr * attr = IFA_RTA(addr); RTA_OK(attr, attrlen); attr = RTA_NEXT(attr, attrlen)) {
         switch(attr->rta_type){
-            case IFA_LOCAL:
+            case IFA_ADDRESS:
                 ip_ptr = (int*)RTA_DATA(attr);
                 break;
+            // case IFA_LOCAL:
+            //     ip_ptr = (int*)RTA_DATA(attr);
+            //     break;
             default:
                 break;
         }
@@ -63,21 +66,13 @@ process_newaddr_attrs(struct soap * soap, struct _tds__GetNetworkInterfacesRespo
         }
 
 skip_manual:
-        address->PrefixLength = addr->ifa_prefixlen;;
-
-        address->Address = soap_malloc(soap,16); //Max ipv4 length in worst case scenario
-        char bytenumber[4];
-        itoa(bytenumber, *ip_ptr & 0xFF, 10);
-        strcpy(address->Address, bytenumber);
-        strcat(address->Address, ".");
-        itoa(bytenumber, (*ip_ptr >> 8) & 0xFF, 10);
-        strcat(address->Address, bytenumber);
-        strcat(address->Address, ".");
-        itoa(bytenumber, (*ip_ptr >> 16) & 0xFF, 10);
-        strcat(address->Address, bytenumber);
-        strcat(address->Address, ".");
-        itoa(bytenumber, (*ip_ptr >> 24) & 0xFF, 10);
-        strcat(address->Address, bytenumber);
+        if(ip_ptr){
+            address->PrefixLength = addr->ifa_prefixlen;
+            address->Address = soap_malloc(soap,16);
+            inet_ntop(AF_INET, ip_ptr, address->Address, 16);
+        } else {
+            C_ERROR("No ipv4 address found");
+        }
     } else if(addr->ifa_family == AF_INET6){
         if(!NetworkInterface->IPv6) NetworkInterface->IPv6 = soap_new_tt__IPv6NetworkInterface(soap, 1);
         NetworkInterface->IPv6->Enabled = xsd__boolean__true_;
@@ -107,9 +102,11 @@ skip_manual:
         }
         
         if(ip_ptr){
+            address->PrefixLength = addr->ifa_prefixlen;;
             address->Address = soap_malloc(soap,128);
-            snprintf(address->Address, 64, " %02x:%02x:%02x:%02x:%02x:%02x", 
-                ip_ptr[0], ip_ptr[1], ip_ptr[2], ip_ptr[3], ip_ptr[4], ip_ptr[5]);
+            inet_ntop(AF_INET6, ip_ptr, address->Address, 128);
+        } else {
+            C_ERROR("No ipv6 address found");
         }
 
         //TODO enum xsd__boolean *AcceptRouterAdvert;
@@ -174,6 +171,7 @@ process_newlink_attrs(struct soap * soap, struct _tds__GetNetworkInterfacesRespo
     }
 
     NetworkInterface->Info = soap_new_tt__NetworkInterfaceInfo(soap, 1);
+    NetworkInterface->Enabled = *state == 6;
     NetworkInterface->Info->HwAddress = soap_malloc(soap, 64);
     snprintf(NetworkInterface->Info->HwAddress, 64, " %02x:%02x:%02x:%02x:%02x:%02x", 
     	mac_ptr[0], mac_ptr[1], mac_ptr[2], mac_ptr[3], mac_ptr[4], mac_ptr[5]);

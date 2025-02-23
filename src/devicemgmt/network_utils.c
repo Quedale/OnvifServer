@@ -5,7 +5,7 @@
 #include <arpa/inet.h>
 #include <linux/if.h>
 
-#define ONVIF_NET_BUFFER_SIZE 81920
+#define ONVIF_NET_BUFFER_SIZE 8192
 
 struct nlreq {
 	struct nlmsghdr hdr;
@@ -37,19 +37,36 @@ print_ifaddr_flags(__u8 flags){
 }
 
 static void 
-print_ifaddr(struct ifaddrmsg * addr){
+print_ifaddr(struct nlmsghdr * nl, struct ifaddrmsg * addr){
 	C_DEBUG("===================== ifaddr =====================");
     C_DEBUG("\tindex : \t%d",addr->ifa_index);
     C_DEBUG("\tprefix length:\t%d", addr->ifa_prefixlen);
+	if(addr->ifa_family == AF_INET6){
+		C_DEBUG("\tIPv6");
+	} else 	if(addr->ifa_family == AF_INET){
+		C_DEBUG("\tIPv4");
+	} else {
+		C_DEBUG("\tunknown family : \t%d",addr->ifa_family);
+	}
 	//ifa_scope 
 
     C_DEBUG(" \n\tAttributes\n");
     int found_attr = 0;
-    // int len = ((struct nlmsghdr *)addr)->nlmsg_len - NLMSG_LENGTH( sizeof( *addr ) );
-    int len = IFA_PAYLOAD((struct nlmsghdr *)addr);
-    for (struct rtattr * attr = IFA_RTA(addr); RTA_OK(attr, len); attr = RTA_NEXT(attr, len)) {
+    int len = nl->nlmsg_len - NLMSG_LENGTH( sizeof( *addr ) );
+	for (struct rtattr * attr = IFA_RTA(addr); RTA_OK(attr, len); attr = RTA_NEXT(attr, len)) {
         found_attr=1;
         switch(attr->rta_type){
+			case IFA_ADDRESS:
+				if(addr->ifa_family == AF_INET6){
+					char pradd[128];
+					inet_ntop(AF_INET6, RTA_DATA(attr), pradd, sizeof(pradd));
+					C_DEBUG("\t\taddress \t\t%s", pradd);
+				} else 	if(addr->ifa_family == AF_INET){
+					char pradd[16];
+					inet_ntop(AF_INET, RTA_DATA(attr), pradd, sizeof(pradd));
+					C_DEBUG("\t\taddress \t%s", pradd);
+				}
+				break;
             case IFA_LABEL:
                 C_DEBUG("\t\tlabel:\t\t%s", (char*)RTA_DATA(attr));
                 break;
@@ -78,6 +95,25 @@ print_ifaddr(struct ifaddrmsg * addr){
                     ((struct ifa_cacheinfo *)RTA_DATA(attr))->cstamp, 
                     ((struct ifa_cacheinfo *)RTA_DATA(attr))->tstamp);
                 break;
+			case IFA_PROTO:
+				switch(*(int*)RTA_DATA(attr)){
+					case IFAPROT_UNSPEC:
+						C_DEBUG("\t\tProtocol UNSPEC");
+						break;
+					case IFAPROT_KERNEL_LO:
+						C_DEBUG("\t\tProtocol Kernel LO");
+						break;
+					case IFAPROT_KERNEL_RA:
+						C_DEBUG("\t\tProtocol Kernel RA");
+						break;
+					case IFAPROT_KERNEL_LL:
+						C_DEBUG("\t\tProtocol Kernel LL");
+						break;
+					default:
+						C_DEBUG("\t\tUnknown protocol");
+						break;
+				}
+				break;
             case IFA_UNSPEC: //Not sure why this would come up other than reaching the end of the actual message body (Extra buffer padding)
                 break;
             default:
@@ -126,6 +162,7 @@ print_ifinfo(struct ifinfomsg * info){
     int found_attr = 0;
     int len = IFLA_PAYLOAD((struct nlmsghdr *) info);
     for (struct rtattr * attr = IFLA_RTA(info); RTA_OK(attr, len); attr = RTA_NEXT(attr, len)){
+		found_attr =1;
         switch (attr->rta_type){
 			case IFLA_PHYS_PORT_NAME:
 				C_DEBUG("Physical port name : %s",(char*)RTA_DATA(attr));
@@ -203,16 +240,19 @@ NetworkUtils__kernel_cmd(int sock, int * len, struct soap * soap, void * user_da
 			C_ERROR("Failed to read msg");
 			return -1;
 		}
+
+		int fount_if = 0;
         //TODO page message in case the response is bigger than the buffer
 		for (struct nlmsghdr * msg_ptr = (struct nlmsghdr *)buf;
 				NLMSG_OK(msg_ptr, *len); msg_ptr = NLMSG_NEXT(msg_ptr, *len)){
 					if(msg_ptr->nlmsg_type == NLMSG_DONE)
 						return 1;
+					fount_if=1;
 #ifdef NET_DEBUG
 					struct nlmsghdr * tmp_ptr = msg_ptr;
 					switch (tmp_ptr->nlmsg_type){
 						case RTM_NEWADDR:
-							print_ifaddr(NLMSG_DATA(tmp_ptr));
+							print_ifaddr(tmp_ptr, NLMSG_DATA(tmp_ptr));
 							break;
 						case RTM_NEWLINK:
 							print_ifinfo(NLMSG_DATA(tmp_ptr));
@@ -226,6 +266,9 @@ NetworkUtils__kernel_cmd(int sock, int * len, struct soap * soap, void * user_da
 						return -1;
 					}
 		}
+
+		if(!fount_if)
+			C_ERROR("No interface found");
 	}
 
     return 0;
@@ -251,7 +294,7 @@ NetworkUtils__query(struct soap * soap, void * user_data, NetworkUtilsQueryType 
 	memset(&req, 0, sizeof(req));
 	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
 	// req.hdr.nlmsg_pid = getpid(); //Let the kernel deal with it
-	// req.gen.ifi_family = AF_INET; // AF_INET6;
+	req.gen.ifi_family = PF_UNSPEC; //AF_INET; // AF_INET6;
 
 	struct iovec io;
 	memset(&io, 0, sizeof(io));
@@ -306,7 +349,6 @@ NetworkUtils__lookup_ip (const char *host, char * retval){
 				break;
 		}
 		inet_ntop (res->ai_family, ptr, retval, 100);
-		// C_FATAL ("IPv%d address: %s (%s)\n", res->ai_family == PF_INET6 ? 6 : 4, retval, res->ai_canonname);
 		res = res->ai_next;
 	}
   

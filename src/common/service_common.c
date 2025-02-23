@@ -68,7 +68,7 @@ soap_realloc(struct soap *soap, void * ptr, size_t n, size_t * orignalsize){
         }
     }
 
-    if (ptr){
+    if (*q){
         //Extract original allocation size
         size_t og_size = *(size_t*)(*q + sizeof(void *));
 
